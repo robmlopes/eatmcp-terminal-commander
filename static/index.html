@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EATMCP · Dev Dashboard</title>
+  <style>
+    :root {
+      --bg-main: #0d1117;
+      --bg-card: #161b22;
+      --bg-input: #0b0f14;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --yellow: #d29922;
+      --red: #f85149;
+      --purple: #bc8cff;
+      --font-mono: Consolas, "Liberation Mono", Menlo, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg-main);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.5;
+      padding: 20px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 24px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand h1 { font-size: 20px; font-weight: 600; color: #fff; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge-live { background: rgba(63, 185, 80, 0.2); color: var(--green); border: 1px solid var(--green); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-right: 6px; animation: pulse 2s infinite; }
+    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+    
+    .grid-env {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .card-title { font-size: 11px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; margin-bottom: 4px; }
+    .card-val { font-size: 15px; font-weight: 600; color: #fff; font-family: var(--font-mono); }
+    
+    .layout-split {
+      display: grid;
+      grid-template-columns: 420px 1fr;
+      gap: 20px;
+    }
+    @media (max-width: 960px) { .layout-split { grid-template-columns: 1fr; } }
+    
+    .section-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #fff; display: flex; align-items: center; justify-content: space-between; }
+    
+    /* Form Styles */
+    .form-group { margin-bottom: 12px; }
+    label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; font-weight: 500; }
+    select, input, textarea {
+      width: 100%;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: #fff;
+      padding: 8px 10px;
+      font-size: 13px;
+      font-family: var(--font-mono);
+      outline: none;
+    }
+    select:focus, input:focus, textarea:focus { border-color: var(--accent); }
+    
+    button {
+      background: #238636;
+      color: #fff;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+      width: 100%;
+      transition: background 0.2s;
+    }
+    button:hover { background: #2ea043; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    
+    /* Log & History Stream */
+    .log-stream {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-height: 75vh;
+      overflow-y: auto;
+      padding-right: 6px;
+    }
+    .log-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      transition: border-color 0.2s;
+    }
+    .log-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .log-tool { font-family: var(--font-mono); font-weight: 600; color: var(--accent); font-size: 14px; }
+    .log-badges { display: flex; gap: 6px; }
+    .badge-low { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+    .badge-medium { background: rgba(210, 153, 34, 0.15); color: var(--yellow); }
+    .badge-high { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+    .badge-crit { background: var(--red); color: #fff; }
+    
+    .badge-success { background: rgba(63, 185, 80, 0.2); color: var(--green); }
+    .badge-fail { background: rgba(248, 81, 73, 0.2); color: var(--red); }
+    
+    .console-box {
+      background: #070a0e;
+      border: 1px solid #21262d;
+      border-radius: 6px;
+      padding: 10px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      margin-top: 6px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      max-height: 180px;
+    }
+    .stdout { color: #58a6ff; }
+    .stderr { color: var(--red); }
+    .meta-row { display: flex; gap: 16px; font-size: 11px; color: var(--text-muted); margin-top: 8px; font-family: var(--font-mono); }
+    .diag-banner {
+      background: rgba(248, 81, 73, 0.1);
+      border-left: 3px solid var(--red);
+      padding: 8px 10px;
+      border-radius: 4px;
+      margin-top: 8px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <h1>EATMCP Terminal Commander</h1>
+      <span class="badge badge-live"><span class="dot"></span>Live Inspector</span>
+    </div>
+    <div style="font-size: 13px; color: var(--text-muted);">
+      Harness Server: <span style="color:#fff; font-family: var(--font-mono);">stdio + :3001</span>
+    </div>
+  </header>
+
+  <!-- Environment Fingerprint Cards -->
+  <div class="grid-env" id="env-grid">
+    <div class="card"><div class="card-title">Sistema Operacional</div><div class="card-val" id="env-os">Detectando...</div></div>
+    <div class="card"><div class="card-title">Arquitetura</div><div class="card-val" id="env-arch">-</div></div>
+    <div class="card"><div class="card-title">Shell Principal</div><div class="card-val" id="env-shell">-</div></div>
+    <div class="card"><div class="card-title">Init / Service Manager</div><div class="card-val" id="env-init">-</div></div>
+    <div class="card"><div class="card-title">Gerenciador de Pacotes</div><div class="card-val" id="env-pm">-</div></div>
+    <div class="card"><div class="card-title">Usuário & Privilégios</div><div class="card-val" id="env-user">-</div></div>
+  </div>
+
+  <div class="layout-split">
+    <!-- Left column: Interactive Playground -->
+    <div class="card" style="height: fit-content;">
+      <div class="section-title">
+        <span>🧪 Testador de Ferramenta</span>
+      </div>
+      
+      <div class="form-group">
+        <label for="tool-select">Ferramenta MCP</label>
+        <select id="tool-select">
+          <option value="environment.inspect">environment.inspect</option>
+          <option value="environment.capabilities">environment.capabilities</option>
+          <option value="command.validate">command.validate</option>
+          <option value="command.execute" selected>command.execute</option>
+          <option value="service.status">service.status</option>
+          <option value="service.restart">service.restart</option>
+          <option value="process.list">process.list</option>
+          <option value="network.port_check">network.port_check</option>
+          <option value="filesystem.exists">filesystem.exists</option>
+        </select>
+      </div>
+
+      <div id="dynamic-inputs">
+        <div class="form-group">
+          <label>Comando (Executable)</label>
+          <input type="text" id="arg-command" value="whoami" placeholder="ex: whoami, ping, sc.exe">
+        </div>
+        <div class="form-group">
+          <label>Argumentos (separados por espaço)</label>
+          <input type="text" id="arg-args" value="" placeholder="ex: -n 2 127.0.0.1">
+        </div>
+        <div class="form-group">
+          <label>Timeout (ms)</label>
+          <input type="number" id="arg-timeout" value="10000">
+        </div>
+      </div>
+
+      <button id="btn-exec">Executar Ferramenta</button>
+    </div>
+
+    <!-- Right column: Live Traffic & Audit Stream -->
+    <div>
+      <div class="section-title">
+        <span>📡 Tráfego em Tempo Real & Auditoria (DSH + Dev UI)</span>
+        <span style="font-size: 12px; color: var(--text-muted);" id="stream-count">0 registros</span>
+      </div>
+      <div class="log-stream" id="log-stream">
+        <div style="color: var(--text-muted); text-align: center; padding: 40px;">
+          Aguardando requisições MCP... As chamadas feitas pelo agente no DSH Web aparecerão aqui automaticamente.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const envOs = document.getElementById('env-os');
+    const envArch = document.getElementById('env-arch');
+    const envShell = document.getElementById('env-shell');
+    const envInit = document.getElementById('env-init');
+    const envPm = document.getElementById('env-pm');
+    const envUser = document.getElementById('env-user');
+    const toolSelect = document.getElementById('tool-select');
+    const dynamicInputs = document.getElementById('dynamic-inputs');
+    const btnExec = document.getElementById('btn-exec');
+    const logStream = document.getElementById('log-stream');
+    const streamCount = document.getElementById('stream-count');
+
+    let totalEvents = 0;
+
+    // Fetch initial environment fingerprint
+    async function loadEnvironment() {
+      try {
+        const res = await fetch('/api/environment');
+        const fp = await res.json();
+        envOs.textContent = `${fp.distribution || fp.platform} (${fp.version})`;
+        envArch.textContent = fp.architecture;
+        envShell.textContent = `${fp.shell} [${fp.available_shells.join(', ')}]`;
+        envInit.textContent = fp.init_system;
+        envPm.textContent = `${fp.package_manager} [${fp.available_package_managers.join(', ') || 'nenhum'}]`;
+        envUser.textContent = `${fp.user} ${fp.is_admin ? '(Admin)' : '(Usuário Padrão)'}`;
+      } catch (err) {
+        console.error('Failed to fetch env:', err);
+      }
+    }
+
+    // Dynamic inputs renderer based on tool
+    toolSelect.addEventListener('change', () => {
+      const tool = toolSelect.value;
+      if (tool === 'command.execute') {
+        dynamicInputs.innerHTML = `
+          <div class="form-group"><label>Comando (Executable)</label><input type="text" id="arg-command" value="whoami"></div>
+          <div class="form-group"><label>Argumentos</label><input type="text" id="arg-args" value=""></div>
+          <div class="form-group"><label>Timeout (ms)</label><input type="number" id="arg-timeout" value="10000"></div>
+        `;
+      } else if (tool === 'command.validate') {
+        dynamicInputs.innerHTML = `
+          <div class="form-group"><label>Comando</label><input type="text" id="arg-command" value="rm -rf /"></div>
+          <div class="form-group"><label>Argumentos</label><input type="text" id="arg-args" value=""></div>
+        `;
+      } else if (tool === 'service.status' || tool === 'service.restart') {
+        dynamicInputs.innerHTML = `
+          <div class="form-group"><label>Nome do Serviço</label><input type="text" id="arg-name" value="wuauserv"></div>
+        `;
+      } else if (tool === 'network.port_check') {
+        dynamicInputs.innerHTML = `
+          <div class="form-group"><label>Host</label><input type="text" id="arg-host" value="127.0.0.1"></div>
+          <div class="form-group"><label>Porta TCP</label><input type="number" id="arg-port" value="3001"></div>
+        `;
+      } else if (tool === 'filesystem.exists') {
+        dynamicInputs.innerHTML = `
+          <div class="form-group"><label>Caminho do Arquivo/Diretório</label><input type="text" id="arg-path" value="Cargo.toml"></div>
+        `;
+      } else if (tool === 'process.list') {
+        dynamicInputs.innerHTML = `
+          <div class="form-group"><label>Limite de Processos</label><input type="number" id="arg-limit" value="15"></div>
+        `;
+      } else {
+        dynamicInputs.innerHTML = `<p style="color:var(--text-muted); font-size:13px; margin: 10px 0;">Nenhum parâmetro necessário.</p>`;
+      }
+    });
+
+    // Execute Tool via REST API
+    btnExec.addEventListener('click', async () => {
+      btnExec.disabled = true;
+      btnExec.textContent = 'Executando...';
+      const tool = toolSelect.value;
+      const args = {};
+
+      if (document.getElementById('arg-command')) args.command = document.getElementById('arg-command').value;
+      if (document.getElementById('arg-args')) {
+        const raw = document.getElementById('arg-args').value.trim();
+        args.args = raw ? raw.split(' ') : [];
+      }
+      if (document.getElementById('arg-name')) args.name = document.getElementById('arg-name').value;
+      if (document.getElementById('arg-host')) args.host = document.getElementById('arg-host').value;
+      if (document.getElementById('arg-port')) args.port = parseInt(document.getElementById('arg-port').value, 10);
+      if (document.getElementById('arg-path')) args.path = document.getElementById('arg-path').value;
+      if (document.getElementById('arg-limit')) args.limit = parseInt(document.getElementById('arg-limit').value, 10);
+      if (document.getElementById('arg-timeout')) args.timeout_ms = parseInt(document.getElementById('arg-timeout').value, 10);
+
+      try {
+        await fetch('/api/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tool, arguments: args })
+        });
+      } catch (e) {
+        console.error('Call failed:', e);
+      } finally {
+        btnExec.disabled = false;
+        btnExec.textContent = 'Executar Ferramenta';
+      }
+    });
+
+    // Render Event Card
+    function renderEvent(ev) {
+      if (totalEvents === 0) logStream.innerHTML = '';
+      totalEvents++;
+      streamCount.textContent = `${totalEvents} eventos`;
+
+      const item = document.createElement('div');
+      item.className = 'log-item';
+
+      const riskClass = `badge-${(ev.risk_level || 'low').toLowerCase()}`;
+      const statusClass = ev.is_error ? 'badge-fail' : 'badge-success';
+
+      let stdoutBlock = ev.stdout ? `<div class="console-box stdout">${escapeHtml(ev.stdout)}</div>` : '';
+      let stderrBlock = ev.stderr ? `<div class="console-box stderr">${escapeHtml(ev.stderr)}</div>` : '';
+      let diagBlock = '';
+      if (ev.is_error && ev.error_class) {
+        diagBlock = `
+          <div class="diag-banner">
+            <strong>⚠️ [${ev.error_class}] Causa provável:</strong> ${escapeHtml(ev.likely_cause || '')}<br>
+            <strong>💡 Próxima ação sugerida:</strong> ${escapeHtml(ev.suggested_next_action || '')}
+          </div>
+        `;
+      }
+
+      item.innerHTML = `
+        <div class="log-header">
+          <span class="log-tool">${escapeHtml(ev.tool_name)}</span>
+          <div class="log-badges">
+            <span class="badge ${riskClass}">${ev.risk_level || 'LOW'}</span>
+            <span class="badge ${statusClass}">${ev.validation_status || (ev.is_error ? 'FAILED' : 'SUCCESS')}</span>
+          </div>
+        </div>
+        <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">
+          <strong>Args:</strong> <code style="color:#fff">${escapeHtml(JSON.stringify(ev.arguments))}</code>
+        </div>
+        ${stdoutBlock}
+        ${stderrBlock}
+        ${diagBlock}
+        <div class="meta-row">
+          <span>Duração: ${ev.duration_ms}ms</span>
+          <span>Exit Code: ${ev.exit_code !== null ? ev.exit_code : 'n/a'}</span>
+          <span>Origem: ${escapeHtml(ev.source || 'stdio')}</span>
+        </div>
+      `;
+
+      logStream.insertBefore(item, logStream.firstChild);
+    }
+
+    function escapeHtml(str) {
+      return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // Connect to SSE stream
+    function connectSse() {
+      const es = new EventSource('/api/events');
+      es.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          renderEvent(data);
+        } catch (err) {
+          console.error(err);
+        }
+      };
+      es.onerror = () => {
+        setTimeout(connectSse, 3000);
+      };
+    }
+
+    // Load initial history
+    async function loadHistory() {
+      try {
+        const res = await fetch('/api/history');
+        const list = await res.json();
+        list.forEach(renderEvent);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    loadEnvironment();
+    loadHistory();
+    connectSse();
+  </script>
+</body>
+</html>

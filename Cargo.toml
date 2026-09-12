@@ -1,0 +1,22 @@
+[package]
+name = "eatmcp"
+version = "0.1.0"
+edition = "2021"
+description = "Environment-Aware Terminal MCP Server"
+
+[dependencies]
+tokio = { version = "1.43", features = ["full"] }
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sysinfo = "0.33"
+thiserror = "2.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+
+[[bin]]
+name = "eatmcp"
+path = "src/main.rs"
