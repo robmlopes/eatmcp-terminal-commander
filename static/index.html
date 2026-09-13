@@ -362,9 +362,15 @@
         `;
       }
 
+      const projectBadge = ev.project ? `<span class="badge" style="background:#1f2937; color:#38bdf8; border:1px solid #374151;">📁 ${escapeHtml(ev.project)}</span>` : '';
+      const pidInfo = ev.pid ? `<span>PID: ${ev.pid}</span>` : '';
+
       item.innerHTML = `
         <div class="log-header">
-          <span class="log-tool">${escapeHtml(ev.tool_name)}</span>
+          <div style="display:flex; align-items:center; gap:8px;">
+            ${projectBadge}
+            <span class="log-tool">${escapeHtml(ev.tool_name)}</span>
+          </div>
           <div class="log-badges">
             <span class="badge ${riskClass}">${ev.risk_level || 'LOW'}</span>
             <span class="badge ${statusClass}">${ev.validation_status || (ev.is_error ? 'FAILED' : 'SUCCESS')}</span>
@@ -380,6 +386,7 @@
           <span>Duração: ${ev.duration_ms}ms</span>
           <span>Exit Code: ${ev.exit_code !== null ? ev.exit_code : 'n/a'}</span>
           <span>Origem: ${escapeHtml(ev.source || 'stdio')}</span>
+          ${pidInfo}
         </div>
       `;
 

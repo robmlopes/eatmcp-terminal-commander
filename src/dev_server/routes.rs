@@ -19,8 +19,17 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/execute", post(execute_tool))
         .route("/api/history", get(get_history))
         .route("/api/events", get(get_events))
+        .route("/api/record", post(receive_external_record))
         .layer(CorsLayer::permissive())
         .with_state(state)
+}
+
+async fn receive_external_record(
+    State(state): State<Arc<AppState>>,
+    Json(record): Json<crate::state::ExecutionRecord>,
+) -> impl IntoResponse {
+    state.record_locally(record).await;
+    axum::http::StatusCode::OK
 }
 
 async fn serve_index() -> Html<&'static str> {

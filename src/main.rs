@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
 use eatmcp::dev_server;
@@ -95,20 +95,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         return Ok(());
     }
 
-    let state = AppState::new();
-
-    // Default dev port to 3001 unless --no-dev
-    if !no_dev && dev_port.is_none() {
-        dev_port = Some(3001);
-    }
+    let state = AppState::new(dev_host.clone(), port);
 
     // Start Dev Web Dashboard if configured
-    if let Some(port) = dev_port {
+    if !no_dev {
         let dev_state = Arc::clone(&state);
         let host = dev_host.clone();
         tokio::spawn(async move {
-            if let Err(e) = dev_server::start_dev_server(dev_state, &host, port).await {
-                warn!("Dev Web Dashboard could not start on {}:{}: {}", host, port, e);
+            if let Err(e) = dev_server::start_dev_server(Arc::clone(&dev_state), &host, port).await {
+                info!("Dev Web Dashboard already active on {}:{} - this instance will relay events to it ({})", host, port, e);
             }
         });
     }

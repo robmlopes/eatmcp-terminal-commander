@@ -405,10 +405,21 @@ async fn record_call(
     likely_cause: Option<String>,
     suggested_next_action: Option<String>,
 ) {
+    let project = std::env::current_dir()
+        .map(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_else(|| p.to_str().unwrap_or("."))
+                .to_string()
+        })
+        .unwrap_or_else(|_| "unknown".to_string());
+
     let rec = ExecutionRecord {
         id: format!("rec-{}", now_timestamp()),
         timestamp: now_timestamp(),
         source: "stdio".to_string(),
+        project,
+        pid: std::process::id(),
         tool_name: tool_name.to_string(),
         arguments,
         risk_level: risk.to_string(),

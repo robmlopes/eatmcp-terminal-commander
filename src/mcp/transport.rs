@@ -13,7 +13,7 @@ pub async fn run_stdio_server(state: Arc<AppState>) -> Result<(), Box<dyn std::e
     info!("EATMCP stdio transport initialized, listening on stdin");
 
     while let Some(line) = reader.next_line().await? {
-        let trimmed = line.trim();
+        let trimmed = line.trim().trim_start_matches('\u{feff}');
         if trimmed.is_empty() {
             continue;
         }
