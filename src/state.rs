@@ -86,6 +86,9 @@ impl AppState {
     async fn record_internal(&self, record: ExecutionRecord, forward: bool) {
         {
             let mut hist = self.history.write().await;
+            if hist.iter().any(|r| r.id == record.id) {
+                return; // Deduplicate: already stored
+            }
             if hist.len() >= 200 {
                 hist.remove(0);
             }
@@ -143,4 +146,11 @@ pub fn now_timestamp() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+pub fn now_timestamp_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
 }

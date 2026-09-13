@@ -338,14 +338,24 @@
       }
     });
 
-    // Render Event Card
+    const seenEventIds = new Set();
+    let sseClient = null;
+
+    // Render Event Card with deduplication
     function renderEvent(ev) {
+      if (!ev || !ev.id) return;
+      if (seenEventIds.has(ev.id)) {
+        return; // Deduplicate: already rendered on UI
+      }
+      seenEventIds.add(ev.id);
+
       if (totalEvents === 0) logStream.innerHTML = '';
       totalEvents++;
       streamCount.textContent = `${totalEvents} eventos`;
 
       const item = document.createElement('div');
       item.className = 'log-item';
+      item.id = 'event-' + ev.id;
 
       const riskClass = `badge-${(ev.risk_level || 'low').toLowerCase()}`;
       const statusClass = ev.is_error ? 'badge-fail' : 'badge-success';
@@ -397,10 +407,15 @@
       return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
-    // Connect to SSE stream
+    // Connect to SSE stream cleanly without connection multiplication
     function connectSse() {
-      const es = new EventSource('/api/events');
-      es.onmessage = (e) => {
+      if (sseClient) {
+        try { sseClient.close(); } catch {}
+        sseClient = null;
+      }
+
+      sseClient = new EventSource('/api/events');
+      sseClient.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
           renderEvent(data);
@@ -408,8 +423,9 @@
           console.error(err);
         }
       };
-      es.onerror = () => {
-        setTimeout(connectSse, 3000);
+      sseClient.onerror = () => {
+        // EventSource will automatically retry connecting natively.
+        // We DO NOT create duplicate EventSource instances here.
       };
     }
 

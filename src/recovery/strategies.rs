@@ -92,3 +92,49 @@ pub fn diagnose_failure(
         suggested_next_action: "Inspect stderr output and command parameters.".to_string(),
     }
 }
+
+pub fn suggest_missing_program(program: &str, platform: &str) -> String {
+    let lower = program.to_lowercase();
+    if platform == "windows" {
+        if lower == "ls" || lower == "ll" {
+            return "On Windows, use 'dir' or run via PowerShell with use_shell: true.".to_string();
+        }
+        if lower == "cat" {
+            return "On Windows, use 'type' in cmd or 'Get-Content' in PowerShell, or pass use_shell: true.".to_string();
+        }
+        if lower == "rm" {
+            return "On Windows, use 'del' (files) or 'rmdir' (folders), or pass use_shell: true.".to_string();
+        }
+        if lower == "grep" {
+            return "On Windows, use 'findstr' or 'Select-String' in PowerShell.".to_string();
+        }
+        if lower == "which" {
+            return "On Windows, use 'where.exe' or 'Get-Command' in PowerShell.".to_string();
+        }
+        if lower == "sudo" {
+            return "sudo is not native to Windows. Run terminal elevated as Administrator.".to_string();
+        }
+        if lower == "apt" || lower == "apt-get" || lower == "brew" || lower == "apk" {
+            return "Linux/macOS package manager. On Windows, use 'winget' or 'choco'.".to_string();
+        }
+        if lower == "systemctl" || lower == "service" {
+            return "systemd is not available on Windows. Use EATMCP 'service_status' / 'service_restart' or 'sc.exe'.".to_string();
+        }
+        if lower == "npm" || lower == "npx" || lower == "node" || lower == "yarn" || lower == "pnpm" {
+            if std::path::Path::new(r"C:\Program Files\nodejs\npm.cmd").exists() {
+                return format!("Node.js tools located in 'C:\\Program Files\\nodejs'. Try invoking as '{}.cmd' or pass use_shell: true.", program);
+            }
+            return "Node.js was not found in PATH. Install Node.js or verify environment PATH.".to_string();
+        }
+        if lower == "python" || lower == "python3" || lower == "pip" {
+            return "Python was not found in PATH. Try 'py', or specify full python path.".to_string();
+        }
+        if lower == "cargo" || lower == "rustc" {
+            return "Rust toolchain was not found in standard PATH. Verify ~/.cargo/bin or specify full path.".to_string();
+        }
+
+        format!("Command '{}' is not in PATH. Check if it requires a file extension (.exe, .cmd, .bat), or pass use_shell: true to invoke via system shell.", program)
+    } else {
+        format!("Binary '{}' not found in PATH. Verify installation or install with package manager.", program)
+    }
+}

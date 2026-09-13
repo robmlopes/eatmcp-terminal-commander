@@ -54,7 +54,8 @@ pub async fn validate_tcp_port(host: &str, port: u16, timeout_ms: u64) -> Valida
 }
 
 pub async fn validate_filesystem_path(path_str: &str) -> ValidationResult {
-    let p = Path::new(path_str);
+    let clean_str = path_str.trim().replace('"', "");
+    let p = Path::new(&clean_str);
     match tokio::fs::metadata(p).await {
         Ok(meta) => {
             let is_dir = meta.is_dir();
@@ -62,9 +63,9 @@ pub async fn validate_filesystem_path(path_str: &str) -> ValidationResult {
             let size = meta.len();
             ValidationResult {
                 status: ValidationStatus::Success,
-                message: format!("Path '{}' exists (is_dir: {}, is_file: {}, size: {} bytes)", path_str, is_dir, is_file, size),
+                message: format!("Path '{}' exists (is_dir: {}, is_file: {}, size: {} bytes)", clean_str, is_dir, is_file, size),
                 details: serde_json::json!({
-                    "path": path_str,
+                    "path": clean_str,
                     "exists": true,
                     "is_directory": is_dir,
                     "is_file": is_file,

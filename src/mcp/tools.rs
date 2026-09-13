@@ -8,7 +8,7 @@ use crate::execution::process::run_command;
 use crate::recovery::strategies::diagnose_failure;
 use crate::safety::classifier::classify_command;
 use crate::safety::policy::{PolicyAction, RiskLevel};
-use crate::state::{now_timestamp, AppState, ExecutionRecord};
+use crate::state::{now_timestamp, now_timestamp_nanos, AppState, ExecutionRecord};
 use crate::validation::checks::{
     validate_filesystem_path, validate_service_status, validate_tcp_port, ValidationStatus,
 };
@@ -167,12 +167,17 @@ pub async fn call_tool(
                 .unwrap_or_default();
 
             let assessment = classify_command(cmd, &args);
+            let resolution = crate::execution::resolver::resolve_command(cmd);
             let payload = serde_json::json!({
                 "command": cmd,
                 "args": args,
                 "risk_level": assessment.risk_level.to_string(),
                 "action": assessment.action.to_string(),
                 "reason": assessment.reason,
+                "resolved_executable": resolution.resolved_executable,
+                "resolution_source": resolution.resolution_source,
+                "recommended_shell": resolution.recommended_shell,
+                "shell_compatibility": resolution.shell_compatibility,
             });
             let res = CallToolResult::success_json(&payload).unwrap();
             record_call(state, tool_name, arguments, assessment.risk_level, assessment.action, Some(0), &res.content[0].text, "", start.elapsed().as_millis() as u64, ValidationStatus::Success, false, None, None, None).await;
@@ -189,6 +194,7 @@ pub async fn call_tool(
             let use_shell = arguments.get("use_shell").and_then(|v| v.as_bool()).unwrap_or(false);
 
             let assessment = classify_command(cmd, &args);
+            let resolution = crate::execution::resolver::resolve_command(cmd);
             if assessment.action == PolicyAction::Deny {
                 let err_text = format!("SECURITY DENIAL: Command '{}' blocked by safety policy. Reason: {}", cmd, assessment.reason);
                 record_call(state, tool_name, arguments, assessment.risk_level, assessment.action, Some(1), "", &err_text, start.elapsed().as_millis() as u64, ValidationStatus::Failed, true, Some("SECURITY_DENIED".to_string()), Some(assessment.reason), Some("Command violates safety policy and cannot be executed".to_string())).await;
@@ -211,6 +217,9 @@ pub async fn call_tool(
                         "stderr": proc_out.stderr,
                         "duration_ms": proc_out.duration_ms,
                         "timed_out": proc_out.timed_out,
+                        "resolution_source": resolution.resolution_source,
+                        "executed_via": resolution.recommended_shell,
+                        "shell_compatibility": resolution.shell_compatibility,
                         "error_class": err_class,
                         "likely_cause": cause,
                         "suggested_next_action": next_action,
@@ -226,7 +235,16 @@ pub async fn call_tool(
                 }
                 Err(err) => {
                     let err_text = format!("Failed to spawn process '{}': {}", cmd, err);
-                    record_call(state, tool_name, arguments, assessment.risk_level, assessment.action, Some(1), "", &err_text, start.elapsed().as_millis() as u64, ValidationStatus::Failed, true, Some("SPAWN_ERROR".to_string()), Some(err.to_string()), Some("Ensure the executable exists and is accessible".to_string())).await;
+                    let (cause, suggestion) = if err.kind() == std::io::ErrorKind::NotFound {
+                        (
+                            format!("Executable or script '{}' was not found in PATH or cannot be spawned directly.", cmd),
+                            crate::recovery::strategies::suggest_missing_program(cmd, &fp.platform),
+                        )
+                    } else {
+                        (err.to_string(), "Ensure the executable exists, permissions are granted, and working directory is valid.".to_string())
+                    };
+
+                    record_call(state, tool_name, arguments, assessment.risk_level, assessment.action, Some(1), "", &err_text, start.elapsed().as_millis() as u64, ValidationStatus::Failed, true, Some("SPAWN_ERROR".to_string()), Some(cause), Some(suggestion)).await;
                     CallToolResult::error(err_text)
                 }
             }
@@ -415,7 +433,7 @@ async fn record_call(
         .unwrap_or_else(|_| "unknown".to_string());
 
     let rec = ExecutionRecord {
-        id: format!("rec-{}", now_timestamp()),
+        id: format!("rec-{}", now_timestamp_nanos()),
         timestamp: now_timestamp(),
         source: "stdio".to_string(),
         project,
