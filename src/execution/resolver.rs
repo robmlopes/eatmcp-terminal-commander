@@ -1,6 +1,27 @@
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CommandDialect {
+    Posix,
+    CmdBuiltin,
+    PowerShell,
+    WindowsBatch,
+    NativeBinary,
+}
+
+impl std::fmt::Display for CommandDialect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CommandDialect::Posix => write!(f, "POSIX"),
+            CommandDialect::CmdBuiltin => write!(f, "CMD_BUILTIN"),
+            CommandDialect::PowerShell => write!(f, "POWERSHELL"),
+            CommandDialect::WindowsBatch => write!(f, "WINDOWS_BATCH"),
+            CommandDialect::NativeBinary => write!(f, "NATIVE_BINARY"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShellCompatibility {
     pub cmd: bool,
@@ -17,49 +38,180 @@ pub struct CommandResolution {
     pub args_prefix: Vec<String>,
     pub resolution_source: String,
     pub recommended_shell: String, // "direct", "cmd", "powershell", "bash"
+    pub dialect: CommandDialect,
     pub shell_compatibility: ShellCompatibility,
 }
 
-pub fn resolve_command(raw_program: &str) -> CommandResolution {
-    // 1. Clean any surrounding or inner quotes (e.g. C:\"Program Files"\... -> C:\Program Files\...)
+pub fn resolve_command(raw_program: &str, requested_shell: &str) -> CommandResolution {
     let clean_program = clean_unquoted_path(raw_program);
-    let lower = clean_program.to_lowercase();
+    let dialect = detect_command_dialect(&clean_program);
 
-    // 2. Check CMD Built-ins (dir, copy, type, del, etc.)
-    if is_cmd_builtin(&lower) {
-        return CommandResolution {
-            original_command: raw_program.to_string(),
-            resolved_executable: Some("cmd.exe".to_string()),
-            args_prefix: vec!["/c".to_string(), clean_program.clone()],
-            resolution_source: "cmd_builtin".to_string(),
-            recommended_shell: "cmd".to_string(),
-            shell_compatibility: ShellCompatibility {
-                cmd: true,
-                powershell: false,
-                bash: false,
-                notes: Some(format!("'{}' is an internal CMD command. Must be executed via cmd.exe.", clean_program)),
-            },
-        };
+    // 1. Explicit shell request overrides auto-detection
+    match requested_shell {
+        "bash" => {
+            return CommandResolution {
+                original_command: raw_program.to_string(),
+                resolved_executable: Some(clean_program.clone()),
+                args_prefix: vec!["-c".to_string(), clean_program.clone()],
+                resolution_source: "explicit(bash)".to_string(),
+                recommended_shell: "bash".to_string(),
+                dialect,
+                shell_compatibility: ShellCompatibility {
+                    cmd: false,
+                    powershell: false,
+                    bash: true,
+                    notes: Some("Explicit execution via Bash (bash -c). Expects POSIX output.".to_string()),
+                },
+            };
+        }
+        "cmd" => {
+            return CommandResolution {
+                original_command: raw_program.to_string(),
+                resolved_executable: Some("cmd.exe".to_string()),
+                args_prefix: vec!["/c".to_string(), clean_program.clone()],
+                resolution_source: "explicit(cmd)".to_string(),
+                recommended_shell: "cmd".to_string(),
+                dialect,
+                shell_compatibility: ShellCompatibility {
+                    cmd: true,
+                    powershell: false,
+                    bash: false,
+                    notes: Some("Explicit execution via Windows Command Prompt (cmd.exe /c).".to_string()),
+                },
+            };
+        }
+        "powershell" => {
+            let shell_bin = if is_command_in_path("pwsh.exe") { "pwsh.exe" } else { "powershell.exe" };
+            return CommandResolution {
+                original_command: raw_program.to_string(),
+                resolved_executable: Some(shell_bin.to_string()),
+                args_prefix: vec!["-NoProfile".to_string(), "-NonInteractive".to_string(), "-Command".to_string(), clean_program.clone()],
+                resolution_source: "explicit(powershell)".to_string(),
+                recommended_shell: "powershell".to_string(),
+                dialect,
+                shell_compatibility: ShellCompatibility {
+                    cmd: false,
+                    powershell: true,
+                    bash: false,
+                    notes: Some("Explicit execution via PowerShell (-Command). Expects PowerShell table/object output.".to_string()),
+                },
+            };
+        }
+        "direct" => {
+            return CommandResolution {
+                original_command: raw_program.to_string(),
+                resolved_executable: Some(clean_program.clone()),
+                args_prefix: vec![],
+                resolution_source: "explicit(direct)".to_string(),
+                recommended_shell: "direct".to_string(),
+                dialect,
+                shell_compatibility: ShellCompatibility {
+                    cmd: true,
+                    powershell: true,
+                    bash: true,
+                    notes: Some("Direct process spawning without intermediate shell.".to_string()),
+                },
+            };
+        }
+        _ => {}
     }
 
-    // 3. Check PowerShell Cmdlets (Get-Process, Test-Path, etc.)
-    if is_powershell_cmdlet(&lower) {
+    // 2. AUTO-DETECTION MODE (by dialect and OS environment)
+
+    // A. CMD Built-ins (dir, copy, type, del, etc.)
+    if dialect == CommandDialect::CmdBuiltin {
+        if cfg!(windows) {
+            return CommandResolution {
+                original_command: raw_program.to_string(),
+                resolved_executable: Some("cmd.exe".to_string()),
+                args_prefix: vec!["/c".to_string(), clean_program.clone()],
+                resolution_source: "cmd_builtin".to_string(),
+                recommended_shell: "cmd".to_string(),
+                dialect,
+                shell_compatibility: ShellCompatibility {
+                    cmd: true,
+                    powershell: false,
+                    bash: false,
+                    notes: Some(format!("'{}' is a Windows CMD internal command. Executed via cmd.exe /c.", clean_program)),
+                },
+            };
+        } else {
+            return CommandResolution {
+                original_command: raw_program.to_string(),
+                resolved_executable: None,
+                args_prefix: vec![],
+                resolution_source: "cmd_builtin_unsupported_on_linux".to_string(),
+                recommended_shell: "bash".to_string(),
+                dialect,
+                shell_compatibility: ShellCompatibility {
+                    cmd: false,
+                    powershell: false,
+                    bash: false,
+                    notes: Some(format!("'{}' is a Windows CMD internal command and does not exist on Linux. Use POSIX equivalent (e.g. 'ls' for dir, 'cat' for type).", clean_program)),
+                },
+            };
+        }
+    }
+
+    // B. POSIX Commands (ls, grep, cat, awk, sed, etc.)
+    if dialect == CommandDialect::Posix {
+        if cfg!(windows) {
+            let bash_bin = find_windows_bash();
+            return CommandResolution {
+                original_command: raw_program.to_string(),
+                resolved_executable: bash_bin.clone(),
+                args_prefix: if bash_bin.is_some() { vec!["-c".to_string(), clean_program.clone()] } else { vec![] },
+                resolution_source: if bash_bin.is_some() { "posix_bash".to_string() } else { "posix_requires_bash".to_string() },
+                recommended_shell: if bash_bin.is_some() { "bash".to_string() } else { "posix_unavailable".to_string() },
+                dialect,
+                shell_compatibility: ShellCompatibility {
+                    cmd: false,
+                    powershell: false, // Do NOT alias to PowerShell, user explicitly wants POSIX output
+                    bash: bash_bin.is_some(),
+                    notes: Some(format!(
+                        "'{}' is a POSIX/Linux command expecting Unix output. In Windows, it executes via Bash ('bash -c'). For native Windows listing, use 'dir' (CMD); for PowerShell table output, pass shell: 'powershell'.",
+                        clean_program
+                    )),
+                },
+            };
+        } else {
+            return CommandResolution {
+                original_command: raw_program.to_string(),
+                resolved_executable: Some(clean_program.clone()),
+                args_prefix: vec!["-c".to_string(), clean_program.clone()],
+                resolution_source: "posix_native".to_string(),
+                recommended_shell: "bash".to_string(),
+                dialect,
+                shell_compatibility: ShellCompatibility {
+                    cmd: false,
+                    powershell: false,
+                    bash: true,
+                    notes: Some(format!("Native POSIX command '{}' running in Linux Bash.", clean_program)),
+                },
+            };
+        }
+    }
+
+    // C. PowerShell Cmdlets (Get-Process, Test-Path, *.ps1)
+    if dialect == CommandDialect::PowerShell {
+        let shell_bin = if is_command_in_path("pwsh.exe") { "pwsh.exe" } else { "powershell.exe" };
         return CommandResolution {
             original_command: raw_program.to_string(),
-            resolved_executable: Some(if is_command_in_path("pwsh.exe") { "pwsh.exe".to_string() } else { "powershell.exe".to_string() }),
+            resolved_executable: Some(shell_bin.to_string()),
             args_prefix: vec!["-NoProfile".to_string(), "-NonInteractive".to_string(), "-Command".to_string(), clean_program.clone()],
             resolution_source: "powershell_cmdlet".to_string(),
             recommended_shell: "powershell".to_string(),
+            dialect,
             shell_compatibility: ShellCompatibility {
                 cmd: false,
                 powershell: true,
                 bash: false,
-                notes: Some(format!("'{}' is a PowerShell cmdlet. Must be executed via PowerShell / pwsh.", clean_program)),
+                notes: Some(format!("'{}' is a PowerShell cmdlet. Executed via PowerShell / pwsh.", clean_program)),
             },
         };
     }
 
-    // 4. Check Environment Variables for Program Mapping (case-insensitive on Windows)
+    // D. Environment Variables for Program Mapping
     if let Some((path_str, var_name)) = find_in_env_variables(&clean_program) {
         let (shell, prefix) = determine_exec_wrapper(&path_str, &clean_program);
         return CommandResolution {
@@ -68,25 +220,26 @@ pub fn resolve_command(raw_program: &str) -> CommandResolution {
             args_prefix: prefix,
             resolution_source: format!("env_variable({})", var_name),
             recommended_shell: shell,
+            dialect,
             shell_compatibility: analyze_compatibility(&path_str, &clean_program),
         };
     }
 
-    // 5. Check Standard PATH + PATHEXT
+    // E. Standard PATH + PATHEXT
     if let Some((path_str, _ext_kind)) = search_path_with_pathext(&clean_program) {
         let (shell, prefix) = determine_exec_wrapper(&path_str, &clean_program);
-
         return CommandResolution {
             original_command: raw_program.to_string(),
             resolved_executable: Some(path_str.clone()),
             args_prefix: prefix,
             resolution_source: "pathext".to_string(),
             recommended_shell: shell,
+            dialect,
             shell_compatibility: analyze_compatibility(&path_str, &clean_program),
         };
     }
 
-    // 6. Check System Directories on Windows (System32, Sysnative)
+    // F. System Directories on Windows (System32, Sysnative)
     if cfg!(windows) {
         if let Some(sys_path) = find_in_system_dirs(&clean_program) {
             let path_str = sys_path.to_string_lossy().to_string();
@@ -98,24 +251,51 @@ pub fn resolve_command(raw_program: &str) -> CommandResolution {
                 args_prefix: prefix,
                 resolution_source: "system_dir".to_string(),
                 recommended_shell: shell,
+                dialect,
                 shell_compatibility: analyze_compatibility(&path_str, &clean_program),
             };
         }
     }
 
-    // 7. Fallback: Not resolved on disk
+    // G. Fallback: Not resolved on disk
+    let fallback_prefix = if cfg!(windows) {
+        vec!["/c".to_string(), clean_program.clone()]
+    } else {
+        vec!["-c".to_string(), clean_program.clone()]
+    };
+
     CommandResolution {
         original_command: raw_program.to_string(),
         resolved_executable: None,
-        args_prefix: vec![],
+        args_prefix: fallback_prefix,
         resolution_source: "unknown".to_string(),
         recommended_shell: if cfg!(windows) { "cmd".to_string() } else { "sh".to_string() },
+        dialect,
         shell_compatibility: ShellCompatibility {
             cmd: false,
             powershell: false,
             bash: false,
             notes: Some(format!("Program '{}' was not found in PATH, environment mappings, or system directories.", clean_program)),
         },
+    }
+}
+
+pub fn detect_command_dialect(program: &str) -> CommandDialect {
+    let clean = clean_unquoted_path(program);
+    let lower = clean.to_lowercase();
+
+    if is_cmd_builtin(&lower) {
+        CommandDialect::CmdBuiltin
+    } else if is_powershell_cmdlet(&lower) {
+        CommandDialect::PowerShell
+    } else if is_posix_command(&lower) {
+        CommandDialect::Posix
+    } else if lower.ends_with(".cmd") || lower.ends_with(".bat") {
+        CommandDialect::WindowsBatch
+    } else if lower.ends_with(".ps1") {
+        CommandDialect::PowerShell
+    } else {
+        CommandDialect::NativeBinary
     }
 }
 
@@ -134,7 +314,6 @@ pub fn normalize_quoted_command(path: &str) -> String {
 
 pub fn normalize_quoted_arg(arg: &str) -> String {
     let trimmed = arg.trim();
-    // If argument has inner quotes (e.g. C:\"Program Files"\foo)
     if (trimmed.contains(r#"\""#) || trimmed.contains(r#"/"#) || trimmed.contains(r#":\"#)) && trimmed.contains('"') {
         let clean = trimmed.replace('"', "");
         if clean.contains(' ') {
@@ -143,7 +322,6 @@ pub fn normalize_quoted_arg(arg: &str) -> String {
         return clean;
     }
 
-    // If it contains spaces and is not already completely enclosed in double quotes
     if trimmed.contains(' ') && !(trimmed.starts_with('"') && trimmed.ends_with('"')) {
         format!("\"{}\"", trimmed)
     } else {
@@ -170,10 +348,35 @@ fn is_powershell_cmdlet(cmd: &str) -> bool {
     )
 }
 
+fn is_posix_command(cmd: &str) -> bool {
+    matches!(
+        cmd,
+        "ls" | "cat" | "grep" | "awk" | "sed" | "chmod" | "chown" | "export"
+            | "source" | "uname" | "head" | "tail" | "touch" | "wc" | "cut"
+            | "sort" | "uniq" | "tr" | "pwd" | "which" | "find" | "df"
+            | "du" | "env" | "tar" | "gzip" | "gunzip" | "xargs"
+    )
+}
+
+fn find_windows_bash() -> Option<String> {
+    if is_command_in_path("bash.exe") {
+        return Some("bash.exe".to_string());
+    }
+    let git_bash = Path::new(r"C:\Program Files\Git\bin\bash.exe");
+    if git_bash.is_file() {
+        return Some(git_bash.to_string_lossy().to_string());
+    }
+    let msys_bash = Path::new(r"C:\msys64\usr\bin\bash.exe");
+    if msys_bash.is_file() {
+        return Some(msys_bash.to_string_lossy().to_string());
+    }
+    None
+}
+
 fn find_in_env_variables(program: &str) -> Option<(String, String)> {
     let upper = program.to_uppercase();
 
-    // Check direct env var matching PROGRAM
+    // Direct var matching PROGRAM
     if let Some((val, key)) = get_env_var_matching(&[program, &upper]) {
         let p = PathBuf::from(&val);
         if p.is_file() {
@@ -192,7 +395,7 @@ fn find_in_env_variables(program: &str) -> Option<(String, String)> {
         }
     }
 
-    // Home directory variants: PROGRAM_HOME (e.g. JAVA_HOME, NVM_SYMLINK, HIP_PATH, etc.)
+    // Home directory variants
     let home_vars = [
         format!("{}_HOME", upper),
         "JAVA_HOME".to_string(),
@@ -220,7 +423,6 @@ fn find_in_env_variables(program: &str) -> Option<(String, String)> {
 
 fn get_env_var_matching(keys: &[&str]) -> Option<(String, String)> {
     if cfg!(windows) {
-        // Windows: case-insensitive match
         for (k, v) in std::env::vars() {
             for expected in keys {
                 if k.eq_ignore_ascii_case(expected) {
@@ -229,7 +431,6 @@ fn get_env_var_matching(keys: &[&str]) -> Option<(String, String)> {
             }
         }
     } else {
-        // Linux: exact case-sensitive match
         for expected in keys {
             if let Ok(v) = std::env::var(expected) {
                 return Some((v, expected.to_string()));

@@ -209,11 +209,21 @@
       <div id="dynamic-inputs">
         <div class="form-group">
           <label>Comando (Executable)</label>
-          <input type="text" id="arg-command" value="whoami" placeholder="ex: whoami, ping, sc.exe">
+          <input type="text" id="arg-command" value="whoami" placeholder="ex: whoami, ping, dir, ls">
         </div>
         <div class="form-group">
           <label>Argumentos (separados por espaço)</label>
           <input type="text" id="arg-args" value="" placeholder="ex: -n 2 127.0.0.1">
+        </div>
+        <div class="form-group">
+          <label>Terminal / Shell</label>
+          <select id="arg-shell">
+            <option value="auto" selected>auto (Detecção automática por dialeto)</option>
+            <option value="bash">bash (POSIX / Linux - bash -c)</option>
+            <option value="cmd">cmd (Windows CMD - cmd.exe /c)</option>
+            <option value="powershell">powershell (PowerShell -Command)</option>
+            <option value="direct">direct (Direto sem shell)</option>
+          </select>
         </div>
         <div class="form-group">
           <label>Timeout (ms)</label>
@@ -276,12 +286,31 @@
         dynamicInputs.innerHTML = `
           <div class="form-group"><label>Comando (Executable)</label><input type="text" id="arg-command" value="whoami"></div>
           <div class="form-group"><label>Argumentos</label><input type="text" id="arg-args" value=""></div>
+          <div class="form-group">
+            <label>Terminal / Shell</label>
+            <select id="arg-shell">
+              <option value="auto" selected>auto (Detecção automática por dialeto)</option>
+              <option value="bash">bash (POSIX / Linux - bash -c)</option>
+              <option value="cmd">cmd (Windows CMD - cmd.exe /c)</option>
+              <option value="powershell">powershell (PowerShell -Command)</option>
+              <option value="direct">direct (Direto sem shell)</option>
+            </select>
+          </div>
           <div class="form-group"><label>Timeout (ms)</label><input type="number" id="arg-timeout" value="10000"></div>
         `;
       } else if (tool === 'command_validate' || tool === 'command.validate') {
         dynamicInputs.innerHTML = `
-          <div class="form-group"><label>Comando</label><input type="text" id="arg-command" value="rm -rf /"></div>
+          <div class="form-group"><label>Comando</label><input type="text" id="arg-command" value="ls"></div>
           <div class="form-group"><label>Argumentos</label><input type="text" id="arg-args" value=""></div>
+          <div class="form-group">
+            <label>Terminal / Shell pretendido</label>
+            <select id="arg-shell">
+              <option value="auto" selected>auto (Detecção automática por dialeto)</option>
+              <option value="bash">bash (POSIX / Linux)</option>
+              <option value="cmd">cmd (Windows CMD)</option>
+              <option value="powershell">powershell (PowerShell)</option>
+            </select>
+          </div>
         `;
       } else if (tool === 'service_status' || tool === 'service.status' || tool === 'service_restart' || tool === 'service.restart') {
         dynamicInputs.innerHTML = `
@@ -317,6 +346,7 @@
         const raw = document.getElementById('arg-args').value.trim();
         args.args = raw ? raw.split(' ') : [];
       }
+      if (document.getElementById('arg-shell')) args.shell = document.getElementById('arg-shell').value;
       if (document.getElementById('arg-name')) args.name = document.getElementById('arg-name').value;
       if (document.getElementById('arg-host')) args.host = document.getElementById('arg-host').value;
       if (document.getElementById('arg-port')) args.port = parseInt(document.getElementById('arg-port').value, 10);

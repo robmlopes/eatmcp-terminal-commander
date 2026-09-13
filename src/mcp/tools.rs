@@ -51,19 +51,24 @@ pub fn list_tools() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "command_execute".to_string(),
-            description: "PRIMARY TERMINAL EXECUTION ENGINE: Execute any system or CLI command on host terminal. Automatically enforces safety verification, risk classification, timeout termination, and structured error diagnosis. Always prefer this over raw bash/pwsh.".to_string(),
+            description: "PRIMARY TERMINAL EXECUTION ENGINE: Execute commands across shells (bash, cmd, powershell, direct). Preserves exact terminal output and dialect rules. 'auto' selects based on command dialect.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "command": { "type": "string", "description": "Program executable name" },
+                    "command": { "type": "string", "description": "Program executable or command name" },
                     "args": {
                         "type": "array",
                         "items": { "type": "string" },
-                        "description": "Arguments to pass directly to executable"
+                        "description": "Arguments to pass directly to command"
+                    },
+                    "shell": {
+                        "type": "string",
+                        "enum": ["auto", "bash", "cmd", "powershell", "direct"],
+                        "description": "Terminal environment: 'auto' (default), 'bash' (POSIX/Linux output via bash -c), 'cmd' (Windows CMD via cmd.exe /c), 'powershell' (PowerShell object/table output), 'direct' (spawn process directly without shell)"
                     },
                     "working_dir": { "type": "string", "description": "Optional working directory" },
                     "timeout_ms": { "type": "number", "description": "Timeout in milliseconds (default: 30000)" },
-                    "use_shell": { "type": "boolean", "description": "Whether to run inside system shell (default: false)" }
+                    "use_shell": { "type": "boolean", "description": "Legacy alias for shell mode (default: false)" }
                 },
                 "required": ["command"]
             }),
@@ -165,12 +170,16 @@ pub async fn call_tool(
                 .and_then(|v| v.as_array())
                 .map(|arr| arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
                 .unwrap_or_default();
+            let requested_shell = arguments.get("shell")
+                .and_then(|v| v.as_str())
+                .unwrap_or("auto");
 
             let assessment = classify_command(cmd, &args);
-            let resolution = crate::execution::resolver::resolve_command(cmd);
+            let resolution = crate::execution::resolver::resolve_command(cmd, requested_shell);
             let payload = serde_json::json!({
                 "command": cmd,
                 "args": args,
+                "dialect": resolution.dialect.to_string(),
                 "risk_level": assessment.risk_level.to_string(),
                 "action": assessment.action.to_string(),
                 "reason": assessment.reason,
@@ -191,17 +200,26 @@ pub async fn call_tool(
                 .unwrap_or_default();
             let working_dir = arguments.get("working_dir").and_then(|v| v.as_str());
             let timeout_ms = arguments.get("timeout_ms").and_then(|v| v.as_u64()).unwrap_or(30000);
-            let use_shell = arguments.get("use_shell").and_then(|v| v.as_bool()).unwrap_or(false);
+            let requested_shell = arguments.get("shell")
+                .and_then(|v| v.as_str())
+                .or_else(|| {
+                    if arguments.get("use_shell").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        Some("auto")
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or("auto");
 
             let assessment = classify_command(cmd, &args);
-            let resolution = crate::execution::resolver::resolve_command(cmd);
+            let resolution = crate::execution::resolver::resolve_command(cmd, requested_shell);
             if assessment.action == PolicyAction::Deny {
                 let err_text = format!("SECURITY DENIAL: Command '{}' blocked by safety policy. Reason: {}", cmd, assessment.reason);
                 record_call(state, tool_name, arguments, assessment.risk_level, assessment.action, Some(1), "", &err_text, start.elapsed().as_millis() as u64, ValidationStatus::Failed, true, Some("SECURITY_DENIED".to_string()), Some(assessment.reason), Some("Command violates safety policy and cannot be executed".to_string())).await;
                 return CallToolResult::error(err_text);
             }
 
-            match run_command(cmd, &args, working_dir, timeout_ms, use_shell, &fp.shell).await {
+            match run_command(cmd, &args, working_dir, timeout_ms, requested_shell).await {
                 Ok(proc_out) => {
                     let is_err = proc_out.exit_code != Some(0) || proc_out.timed_out;
                     let (val_status, err_class, cause, next_action) = if is_err {
@@ -217,6 +235,7 @@ pub async fn call_tool(
                         "stderr": proc_out.stderr,
                         "duration_ms": proc_out.duration_ms,
                         "timed_out": proc_out.timed_out,
+                        "dialect": resolution.dialect.to_string(),
                         "resolution_source": resolution.resolution_source,
                         "executed_via": resolution.recommended_shell,
                         "shell_compatibility": resolution.shell_compatibility,
@@ -270,10 +289,10 @@ pub async fn call_tool(
                 ("systemctl", vec!["restart".to_string(), svc_name.to_string()])
             };
 
-            let proc_res = run_command(cmd, &args, None, 15000, false, &fp.shell).await;
+            let proc_res = run_command(cmd, &args, None, 15000, "auto").await;
             if fp.platform == "windows" {
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                let _ = run_command("sc.exe", &["start".to_string(), svc_name.to_string()], None, 15000, false, &fp.shell).await;
+                let _ = run_command("sc.exe", &["start".to_string(), svc_name.to_string()], None, 15000, "auto").await;
             }
 
             let val = validate_service_status(svc_name, &fp.platform).await;
@@ -318,7 +337,7 @@ pub async fn call_tool(
                 return CallToolResult::error(err_text);
             }
 
-            match run_command(cmd, &args, None, 120_000, false, &fp.shell).await {
+            match run_command(cmd, &args, None, 120_000, "auto").await {
                 Ok(proc_out) => {
                     let is_err = proc_out.exit_code != Some(0);
                     let payload = serde_json::json!({

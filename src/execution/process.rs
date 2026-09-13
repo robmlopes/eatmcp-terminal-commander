@@ -4,7 +4,7 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 
-use super::resolver::{clean_unquoted_path, normalize_quoted_arg, normalize_quoted_command, resolve_command};
+use super::resolver::{clean_unquoted_path, normalize_quoted_command, resolve_command};
 
 #[derive(Debug, Clone)]
 pub struct ProcessOutput {
@@ -20,63 +20,118 @@ pub async fn run_command(
     args: &[String],
     working_dir: Option<&str>,
     timeout_ms: u64,
-    use_shell: bool,
-    shell: &str,
+    requested_shell: &str,
 ) -> Result<ProcessOutput, std::io::Error> {
     let start_time = Instant::now();
     let clean_prog = clean_unquoted_path(program);
-    let resolution = resolve_command(&clean_prog);
+    let resolution = resolve_command(&clean_prog, requested_shell);
 
-    // 1. Build the command based on explicit request or intelligent resolution
-    let mut cmd = if use_shell {
-        build_shell_command(&clean_prog, args, shell)
-    } else if resolution.recommended_shell == "cmd" {
-        // Automatically route to cmd.exe /c for batch scripts, cmd builtins, and legacy console tools
-        let mut c = Command::new("cmd.exe");
-        let mut combined_args = resolution.args_prefix;
-        let clean_args: Vec<String> = args.iter().map(|a| clean_unquoted_path(a)).collect();
-        combined_args.extend(clean_args);
-        c.args(&combined_args);
-        c
-    } else if resolution.recommended_shell == "powershell" {
-        // Automatically route to powershell.exe for PowerShell cmdlets and .ps1 scripts
-        let shell_bin = if shell == "pwsh" { "pwsh.exe" } else { "powershell.exe" };
-        let mut c = Command::new(shell_bin);
-        let clean_args: Vec<String> = args.iter().map(|a| clean_unquoted_path(a)).collect();
-        let target_prog = resolution.resolved_executable.as_deref().unwrap_or(&clean_prog);
-        let quoted_target = normalize_quoted_command(target_prog);
-        let joined_args: String = clean_args
-            .iter()
-            .map(|a| if a.contains(' ') { format!("\"{}\"", a) } else { a.clone() })
-            .collect::<Vec<_>>()
-            .join(" ");
+    // If POSIX tool was requested on Windows in auto mode and no bash was found
+    if resolution.recommended_shell == "posix_unavailable" {
+        return Ok(ProcessOutput {
+            exit_code: Some(1),
+            stdout: String::new(),
+            stderr: format!(
+                "'{}' is a POSIX/Linux command expecting Unix output. It is not available natively in Windows without Bash or WSL.\nTo get Windows native directory listing, run 'dir' (via CMD).\nIf PowerShell table output is acceptable, explicitly specify shell: 'powershell'.",
+                clean_prog
+            ),
+            duration_ms: start_time.elapsed().as_millis() as u64,
+            timed_out: false,
+        });
+    }
 
-        let full_cmd = if quoted_target.starts_with('"') && quoted_target.ends_with('"') {
-            if joined_args.is_empty() {
-                format!("& {}", quoted_target)
+    if resolution.recommended_shell == "cmd_builtin_unsupported_on_linux" {
+        return Ok(ProcessOutput {
+            exit_code: Some(1),
+            stdout: String::new(),
+            stderr: format!(
+                "'{}' is a Windows CMD internal command and does not exist on Linux. Use POSIX equivalent (e.g. 'ls' for dir, 'cat' for type).",
+                clean_prog
+            ),
+            duration_ms: start_time.elapsed().as_millis() as u64,
+            timed_out: false,
+        });
+    }
+
+    // 1. Build the command based on resolution.recommended_shell
+    let mut cmd = match resolution.recommended_shell.as_str() {
+        "cmd" => {
+            let mut c = Command::new("cmd.exe");
+            let mut combined_args = resolution.args_prefix;
+            let clean_args: Vec<String> = args.iter().map(|a| clean_unquoted_path(a)).collect();
+            combined_args.extend(clean_args);
+            c.args(&combined_args);
+            c
+        }
+        "powershell" => {
+            let shell_bin = if crate::environment::detector::is_command_in_path("pwsh.exe") {
+                "pwsh.exe"
             } else {
-                format!("& {} {}", quoted_target, joined_args)
-            }
-        } else {
-            if joined_args.is_empty() {
-                quoted_target
+                "powershell.exe"
+            };
+            let mut c = Command::new(shell_bin);
+            let clean_args: Vec<String> = args.iter().map(|a| clean_unquoted_path(a)).collect();
+            let target_prog = resolution.resolved_executable.as_deref().unwrap_or(&clean_prog);
+            let quoted_target = normalize_quoted_command(target_prog);
+            let joined_args: String = clean_args
+                .iter()
+                .map(|a| if a.contains(' ') { format!("\"{}\"", a) } else { a.clone() })
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            let full_cmd = if quoted_target.starts_with('"') && quoted_target.ends_with('"') {
+                if joined_args.is_empty() {
+                    format!("& {}", quoted_target)
+                } else {
+                    format!("& {} {}", quoted_target, joined_args)
+                }
             } else {
-                format!("{} {}", quoted_target, joined_args)
+                if joined_args.is_empty() {
+                    quoted_target
+                } else {
+                    format!("{} {}", quoted_target, joined_args)
+                }
+            };
+            c.args(&["-NoProfile", "-NonInteractive", "-Command", &full_cmd]);
+            c
+        }
+        "bash" => {
+            let bash_bin = if cfg!(windows) {
+                if crate::environment::detector::is_command_in_path("bash.exe") {
+                    "bash.exe".to_string()
+                } else if std::path::Path::new(r"C:\Program Files\Git\bin\bash.exe").exists() {
+                    r"C:\Program Files\Git\bin\bash.exe".to_string()
+                } else {
+                    "bash".to_string()
+                }
+            } else {
+                "bash".to_string()
+            };
+            let mut c = Command::new(&bash_bin);
+            let clean_args: Vec<String> = args.iter().map(|a| clean_unquoted_path(a)).collect();
+            let target_prog = resolution.resolved_executable.as_deref().unwrap_or(&clean_prog);
+            let full_cmd = if clean_args.is_empty() {
+                target_prog.to_string()
+            } else {
+                format!("{} {}", target_prog, clean_args.join(" "))
+            };
+            c.args(&["-c", &full_cmd]);
+            c
+        }
+        _ => {
+            if let Some(ref exec) = resolution.resolved_executable {
+                let clean_exec = clean_unquoted_path(exec);
+                let mut c = Command::new(&clean_exec);
+                let clean_args: Vec<String> = args.iter().map(|a| clean_unquoted_path(a)).collect();
+                c.args(&clean_args);
+                c
+            } else {
+                let mut c = Command::new(&clean_prog);
+                let clean_args: Vec<String> = args.iter().map(|a| clean_unquoted_path(a)).collect();
+                c.args(&clean_args);
+                c
             }
-        };
-        c.args(&["-NoProfile", "-NonInteractive", "-Command", &full_cmd]);
-        c
-    } else if let Some(ref exec) = resolution.resolved_executable {
-        let clean_exec = clean_unquoted_path(exec);
-        let mut c = Command::new(&clean_exec);
-        let clean_args: Vec<String> = args.iter().map(|a| clean_unquoted_path(a)).collect();
-        c.args(&clean_args);
-        c
-    } else {
-        let mut c = Command::new(&clean_prog);
-        let clean_args: Vec<String> = args.iter().map(|a| clean_unquoted_path(a)).collect();
-        c.args(&clean_args);
-        c
+        }
     };
 
     if let Some(wd) = working_dir {
@@ -87,14 +142,15 @@ pub async fn run_command(
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
-    // 2. Spawn with automatic shell fallback on Windows if direct spawn fails with NotFound
+    // 2. Spawn process
     let child_res = cmd.spawn();
     let mut child = match child_res {
         Ok(c) => c,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound && !use_shell && cfg!(windows) => {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound && cfg!(windows) => {
+            // Automatic fallback through cmd.exe /c
             let mut fallback_cmd = Command::new("cmd.exe");
             let mut fallback_args = vec!["/s".to_string(), "/c".to_string(), normalize_quoted_command(&clean_prog)];
-            fallback_args.extend(args.iter().map(|a| normalize_quoted_arg(a)));
+            fallback_args.extend(args.iter().map(|a| clean_unquoted_path(a)));
             fallback_cmd.args(&fallback_args);
             if let Some(wd) = working_dir {
                 fallback_cmd.current_dir(clean_unquoted_path(wd));
@@ -135,6 +191,7 @@ pub async fn run_command(
             let duration_ms = start_time.elapsed().as_millis() as u64;
             let stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
             let stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
+
             Ok(ProcessOutput {
                 exit_code: status.code(),
                 stdout,
@@ -154,48 +211,5 @@ pub async fn run_command(
                 timed_out: true,
             })
         }
-    }
-}
-
-fn build_shell_command(program: &str, args: &[String], shell: &str) -> Command {
-    let quoted_program = normalize_quoted_command(program);
-    let formatted_args: Vec<String> = args.iter().map(|a| normalize_quoted_arg(a)).collect();
-    let joined_args = formatted_args.join(" ");
-
-    if cfg!(windows) {
-        if shell == "cmd" {
-            let mut c = Command::new("cmd.exe");
-            let mut cmd_args = vec!["/s".to_string(), "/c".to_string(), quoted_program];
-            cmd_args.extend(formatted_args);
-            c.args(&cmd_args);
-            c
-        } else {
-            let shell_bin = if shell == "pwsh" { "pwsh.exe" } else { "powershell.exe" };
-            let mut c = Command::new(shell_bin);
-            let full_cmd = if quoted_program.starts_with('"') && quoted_program.ends_with('"') {
-                if joined_args.is_empty() {
-                    format!("& {}", quoted_program)
-                } else {
-                    format!("& {} {}", quoted_program, joined_args)
-                }
-            } else {
-                if joined_args.is_empty() {
-                    quoted_program
-                } else {
-                    format!("{} {}", quoted_program, joined_args)
-                }
-            };
-            c.args(&["-NoProfile", "-NonInteractive", "-Command", &full_cmd]);
-            c
-        }
-    } else {
-        let mut c = Command::new(if shell.is_empty() { "sh" } else { shell });
-        let full_cmd = if joined_args.is_empty() {
-            quoted_program
-        } else {
-            format!("{} {}", quoted_program, joined_args)
-        };
-        c.args(&["-c", &full_cmd]);
-        c
     }
 }

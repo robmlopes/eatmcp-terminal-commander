@@ -97,6 +97,9 @@ impl AppState {
         // Broadcast to local live SSE subscribers
         let _ = self.event_tx.send(record.clone());
 
+        // Write execution record to persistent logs/ folder
+        crate::logging::log_execution(&record);
+
         // If this instance is NOT the server, forward the record to the central dev dashboard
         if forward && !self.is_server.load(Ordering::SeqCst) {
             let host = self.hub_host.clone();

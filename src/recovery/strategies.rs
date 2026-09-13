@@ -26,19 +26,20 @@ pub fn diagnose_failure(
     if lower_err.contains("not recognized")
         || lower_err.contains("command not found")
         || lower_err.contains("no such file or directory")
+        || lower_err.contains("não é reconhecido")
+        || lower_err.contains("nao e reconhecido")
         || exit_code == Some(127)
         || exit_code == Some(9009)
     {
         let hint = if platform == "windows" && (program == "systemctl" || program == "apt") {
             format!("'{}' is a Linux command but environment is Windows.", program)
         } else {
-            format!("Binary '{}' is not installed or not in PATH.", program)
+            format!("Binary or command '{}' is not recognized in current shell or not in PATH.", program)
         };
         return Diagnosis {
             error_class: ErrorClass::CommandNotFound,
             likely_cause: hint,
-            suggested_next_action: "Call environment.inspect or environment.capabilities to check available tools."
-                .to_string(),
+            suggested_next_action: suggest_missing_program(program, platform),
         };
     }
 
@@ -46,6 +47,7 @@ pub fn diagnose_failure(
         || lower_err.contains("permission denied")
         || lower_err.contains("run as administrator")
         || lower_err.contains("requires elevation")
+        || lower_err.contains("acesso negado")
         || exit_code == Some(5)
         || exit_code == Some(126)
     {
