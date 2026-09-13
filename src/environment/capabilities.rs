@@ -15,14 +15,14 @@ pub fn get_capabilities(fp: &EnvironmentFingerprint) -> Vec<CapabilityInfo> {
 
     // Environment capabilities
     caps.push(CapabilityInfo {
-        capability: "environment.inspect".to_string(),
+        capability: "environment_inspect".to_string(),
         description: "Returns deep environment fingerprint with cached detection".to_string(),
         supported: true,
         implementation: "native-engine".to_string(),
     });
 
     caps.push(CapabilityInfo {
-        capability: "environment.capabilities".to_string(),
+        capability: "environment_capabilities".to_string(),
         description: "Returns all supported capabilities and underlying OS implementations".to_string(),
         supported: true,
         implementation: "native-engine".to_string(),
@@ -30,14 +30,14 @@ pub fn get_capabilities(fp: &EnvironmentFingerprint) -> Vec<CapabilityInfo> {
 
     // Command execution capabilities
     caps.push(CapabilityInfo {
-        capability: "command.validate".to_string(),
+        capability: "command_validate".to_string(),
         description: "Validates commands against safety policies and classifies risk".to_string(),
         supported: true,
         implementation: "safety-classifier".to_string(),
     });
 
     caps.push(CapabilityInfo {
-        capability: "command.execute".to_string(),
+        capability: "command_execute".to_string(),
         description: "Direct process execution without intermediate shell by default".to_string(),
         supported: true,
         implementation: "direct-process-spawner".to_string(),
@@ -53,7 +53,7 @@ pub fn get_capabilities(fp: &EnvironmentFingerprint) -> Vec<CapabilityInfo> {
         _ => "unsupported".to_string(),
     };
 
-    for cap in &["service.status", "service.start", "service.stop", "service.restart"] {
+    for cap in &["service_status", "service_start", "service_stop", "service_restart"] {
         caps.push(CapabilityInfo {
             capability: cap.to_string(),
             description: format!("Manage system services via {}", service_impl),
@@ -65,7 +65,7 @@ pub fn get_capabilities(fp: &EnvironmentFingerprint) -> Vec<CapabilityInfo> {
     // Package capabilities
     let pkg_supported = fp.package_manager != "none";
     let pkg_impl = format!("native package manager: {}", fp.package_manager);
-    for cap in &["package.install", "package.remove"] {
+    for cap in &["package_install", "package_remove"] {
         caps.push(CapabilityInfo {
             capability: cap.to_string(),
             description: format!("Manage software packages via {}", fp.package_manager),
@@ -76,21 +76,21 @@ pub fn get_capabilities(fp: &EnvironmentFingerprint) -> Vec<CapabilityInfo> {
 
     // Process & System capabilities
     caps.push(CapabilityInfo {
-        capability: "process.list".to_string(),
+        capability: "process_list".to_string(),
         description: "Inspect running processes with PID and memory stats".to_string(),
         supported: true,
         implementation: "sysinfo-native".to_string(),
     });
 
     caps.push(CapabilityInfo {
-        capability: "network.port_check".to_string(),
+        capability: "network_port_check".to_string(),
         description: "Verify TCP port listening state via native non-blocking socket".to_string(),
         supported: true,
         implementation: "tokio-net-tcp".to_string(),
     });
 
     caps.push(CapabilityInfo {
-        capability: "filesystem.exists".to_string(),
+        capability: "filesystem_exists".to_string(),
         description: "Verify file and directory presence and metadata".to_string(),
         supported: true,
         implementation: "tokio-fs".to_string(),

@@ -18,18 +18,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!("Starting EATMCP (Environment-Aware Terminal MCP) v{}", env!("CARGO_PKG_VERSION"));
 
     let args: Vec<String> = std::env::args().collect();
+    let mut dev_host: String = std::env::var("EATMCP_DEV_HOST")
+        .unwrap_or_else(|_| "127.0.0.1".to_string());
     let mut dev_port: Option<u16> = std::env::var("EATMCP_DEV_PORT")
         .ok()
         .and_then(|p| p.parse().ok());
     let mut web_only = false;
     let mut no_dev = false;
 
+    let mut show_configs_requested = false;
+    let mut install_target: Option<String> = None;
+
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--dev-port" => {
+            "--dev-port" | "--port" => {
                 if i + 1 < args.len() {
                     dev_port = args[i + 1].parse().ok();
+                    i += 1;
+                }
+            }
+            "--dev-host" | "--host" => {
+                if i + 1 < args.len() {
+                    dev_host = args[i + 1].clone();
                     i += 1;
                 }
             }
@@ -39,12 +50,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "--no-dev" => {
                 no_dev = true;
             }
+            "--show-configs" => {
+                show_configs_requested = true;
+            }
+            "--install" => {
+                let target = if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                    i += 1;
+                    args[i].clone()
+                } else {
+                    "all".to_string()
+                };
+                install_target = Some(target);
+            }
             "--help" | "-h" => {
                 eprintln!("EATMCP - Environment-Aware Terminal MCP Server");
                 eprintln!("Usage: eatmcp [OPTIONS]");
                 eprintln!();
                 eprintln!("Options:");
-                eprintln!("  --dev-port <PORT>   Start embedded Dev Web Dashboard on port (default: 3001)");
+                eprintln!("  --show-configs      Display MCP JSON configs for all major AI harnesses");
+                eprintln!("  --install <target>  Auto-install config into harness (claude-desktop, cursor, windsurf, all)");
+                eprintln!("  --host <HOST>       Bind address for the Dev Web Dashboard (default: 127.0.0.1)");
+                eprintln!("  --port <PORT>       Port for the Dev Web Dashboard (default: 3001)");
                 eprintln!("  --web-only          Run only the Dev Web Dashboard (no stdio listener)");
                 eprintln!("  --no-dev            Disable the embedded Dev Web Dashboard (stdio only)");
                 eprintln!("  --help, -h          Print help information");
@@ -53,6 +79,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             _ => {}
         }
         i += 1;
+    }
+
+    let port = dev_port.unwrap_or(3001);
+
+    if show_configs_requested {
+        eatmcp::cli::installer::show_configs(&dev_host, port);
+        return Ok(());
+    }
+
+    if let Some(target) = install_target {
+        if let Err(e) = eatmcp::cli::installer::install_for(&target, &dev_host, port) {
+            eprintln!("Error installing for '{}': {}", target, e);
+        }
+        return Ok(());
     }
 
     let state = AppState::new();
@@ -65,9 +105,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Start Dev Web Dashboard if configured
     if let Some(port) = dev_port {
         let dev_state = Arc::clone(&state);
+        let host = dev_host.clone();
         tokio::spawn(async move {
-            if let Err(e) = dev_server::start_dev_server(dev_state, port).await {
-                warn!("Dev Web Dashboard could not start on port {}: {}", port, e);
+            if let Err(e) = dev_server::start_dev_server(dev_state, &host, port).await {
+                warn!("Dev Web Dashboard could not start on {}:{}: {}", host, port, e);
             }
         });
     }

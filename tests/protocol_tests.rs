@@ -19,12 +19,15 @@ fn test_json_rpc_response_serialization() {
 }
 
 #[test]
-fn test_call_tool_result_format() {
-    let res = CallToolResult::success("test result");
-    assert!(!res.is_error);
-    assert_eq!(res.content[0].text, "test result");
-
-    let err_res = CallToolResult::error("something went wrong");
-    assert!(err_res.is_error);
-    assert_eq!(err_res.content[0].text, "something went wrong");
+fn test_tool_names_are_valid_snake_case() {
+    let tools = eatmcp::mcp::tools::list_tools();
+    assert!(!tools.is_empty());
+    for tool in tools {
+        assert!(
+            tool.name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+            "Tool name '{}' must be valid snake_case without dots",
+            tool.name
+        );
+    }
 }
+

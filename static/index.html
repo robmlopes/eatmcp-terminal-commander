@@ -194,15 +194,15 @@
       <div class="form-group">
         <label for="tool-select">Ferramenta MCP</label>
         <select id="tool-select">
-          <option value="environment.inspect">environment.inspect</option>
-          <option value="environment.capabilities">environment.capabilities</option>
-          <option value="command.validate">command.validate</option>
-          <option value="command.execute" selected>command.execute</option>
-          <option value="service.status">service.status</option>
-          <option value="service.restart">service.restart</option>
-          <option value="process.list">process.list</option>
-          <option value="network.port_check">network.port_check</option>
-          <option value="filesystem.exists">filesystem.exists</option>
+          <option value="environment_inspect">environment_inspect</option>
+          <option value="environment_capabilities">environment_capabilities</option>
+          <option value="command_validate">command_validate</option>
+          <option value="command_execute" selected>command_execute</option>
+          <option value="service_status">service_status</option>
+          <option value="service_restart">service_restart</option>
+          <option value="process_list">process_list</option>
+          <option value="network_port_check">network_port_check</option>
+          <option value="filesystem_exists">filesystem_exists</option>
         </select>
       </div>
 
@@ -272,31 +272,31 @@
     // Dynamic inputs renderer based on tool
     toolSelect.addEventListener('change', () => {
       const tool = toolSelect.value;
-      if (tool === 'command.execute') {
+      if (tool === 'command_execute' || tool === 'command.execute') {
         dynamicInputs.innerHTML = `
           <div class="form-group"><label>Comando (Executable)</label><input type="text" id="arg-command" value="whoami"></div>
           <div class="form-group"><label>Argumentos</label><input type="text" id="arg-args" value=""></div>
           <div class="form-group"><label>Timeout (ms)</label><input type="number" id="arg-timeout" value="10000"></div>
         `;
-      } else if (tool === 'command.validate') {
+      } else if (tool === 'command_validate' || tool === 'command.validate') {
         dynamicInputs.innerHTML = `
           <div class="form-group"><label>Comando</label><input type="text" id="arg-command" value="rm -rf /"></div>
           <div class="form-group"><label>Argumentos</label><input type="text" id="arg-args" value=""></div>
         `;
-      } else if (tool === 'service.status' || tool === 'service.restart') {
+      } else if (tool === 'service_status' || tool === 'service.status' || tool === 'service_restart' || tool === 'service.restart') {
         dynamicInputs.innerHTML = `
           <div class="form-group"><label>Nome do Serviço</label><input type="text" id="arg-name" value="wuauserv"></div>
         `;
-      } else if (tool === 'network.port_check') {
+      } else if (tool === 'network_port_check' || tool === 'network.port_check') {
         dynamicInputs.innerHTML = `
           <div class="form-group"><label>Host</label><input type="text" id="arg-host" value="127.0.0.1"></div>
           <div class="form-group"><label>Porta TCP</label><input type="number" id="arg-port" value="3001"></div>
         `;
-      } else if (tool === 'filesystem.exists') {
+      } else if (tool === 'filesystem_exists' || tool === 'filesystem.exists') {
         dynamicInputs.innerHTML = `
           <div class="form-group"><label>Caminho do Arquivo/Diretório</label><input type="text" id="arg-path" value="Cargo.toml"></div>
         `;
-      } else if (tool === 'process.list') {
+      } else if (tool === 'process_list' || tool === 'process.list') {
         dynamicInputs.innerHTML = `
           <div class="form-group"><label>Limite de Processos</label><input type="number" id="arg-limit" value="15"></div>
         `;

@@ -78,6 +78,9 @@ async fn handle_request(state: &Arc<AppState>, req: JsonRpcRequest) -> JsonRpcRe
                 "capabilities": {
                     "tools": {
                         "listChanged": true
+                    },
+                    "prompts": {
+                        "listChanged": true
                     }
                 },
                 "serverInfo": {
@@ -88,6 +91,45 @@ async fn handle_request(state: &Arc<AppState>, req: JsonRpcRequest) -> JsonRpcRe
             JsonRpcResponse::success(id, result)
         }
         "ping" => JsonRpcResponse::success(id, serde_json::json!({})),
+        "prompts/list" => {
+            let prompts = serde_json::json!([
+                {
+                    "name": "eatmcp_terminal_session",
+                    "description": "Directives instructing the AI agent to operate deterministically through the EATMCP terminal layer (inspect -> validate -> execute -> verify).",
+                    "arguments": []
+                }
+            ]);
+            JsonRpcResponse::success(id, serde_json::json!({ "prompts": prompts }))
+        }
+        "prompts/get" => {
+            let params = req.params.unwrap_or(serde_json::Value::Null);
+            let prompt_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            if prompt_name == "eatmcp_terminal_session" {
+                let directive = "\
+CRITICAL TERMINAL POLICY:
+You are equipped with the EATMCP (Environment-Aware Terminal MCP) server. When executing shell commands or inspecting system state:
+1. DISCOVER FIRST: Call `environment_inspect` before running environment-specific commands to detect OS, shell, and package managers.
+2. SAFETY CHECK: Call `command_validate` before any destructive, administrative, or mutative action.
+3. DIRECT EXECUTION: Always execute commands through `command_execute`. It executes processes directly without intermediate shell overhead and captures exit codes deterministically.
+4. VALIDATION: Verify execution output and use validation tools (`service_status`, `network_port_check`, `filesystem_exists`) to confirm operational success.
+Never guess shell commands when the environment can be observed directly.";
+                let result = serde_json::json!({
+                    "description": "EATMCP Terminal Directives",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": {
+                                "type": "text",
+                                "text": directive
+                            }
+                        }
+                    ]
+                });
+                JsonRpcResponse::success(id, result)
+            } else {
+                JsonRpcResponse::error(id, -32602, format!("Prompt '{}' not found", prompt_name), None)
+            }
+        }
         "tools/list" => {
             let tools = super::tools::list_tools();
             JsonRpcResponse::success(id, serde_json::json!({ "tools": tools }))

@@ -16,8 +16,8 @@ use crate::validation::checks::{
 pub fn list_tools() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
-            name: "environment.inspect".to_string(),
-            description: "Inspect current host environment and return detailed fingerprint".to_string(),
+            name: "environment_inspect".to_string(),
+            description: "MANDATORY ENVIRONMENT DISCOVERY: Call this BEFORE executing unfamiliar terminal commands to discover host OS, distribution, architecture, shell, init system, package manager, and privilege level.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {},
@@ -25,8 +25,8 @@ pub fn list_tools() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
-            name: "environment.capabilities".to_string(),
-            description: "List all capabilities supported by this environment and their concrete OS implementations".to_string(),
+            name: "environment_capabilities".to_string(),
+            description: "CAPABILITY REGISTRY: List all capabilities supported by this specific operating environment and their concrete command-line implementations.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {},
@@ -34,8 +34,8 @@ pub fn list_tools() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
-            name: "command.validate".to_string(),
-            description: "Validate a command and its arguments against safety policies without executing it".to_string(),
+            name: "command_validate".to_string(),
+            description: "PRE-EXECUTION SAFETY CHECK: Validate any terminal command and its arguments against system safety policies, classifying risk (LOW, MEDIUM, HIGH, CRITICAL) without running it.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -50,8 +50,8 @@ pub fn list_tools() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
-            name: "command.execute".to_string(),
-            description: "Execute a command on the host terminal with safety validation, timeout, and output capture".to_string(),
+            name: "command_execute".to_string(),
+            description: "PRIMARY TERMINAL EXECUTION ENGINE: Execute any system or CLI command on host terminal. Automatically enforces safety verification, risk classification, timeout termination, and structured error diagnosis. Always prefer this over raw bash/pwsh.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -69,8 +69,8 @@ pub fn list_tools() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
-            name: "service.status".to_string(),
-            description: "Check the current state of a system service".to_string(),
+            name: "service_status".to_string(),
+            description: "Check the current state of a system service using native service manager (sc.exe on Windows, systemctl on Linux).".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -80,8 +80,8 @@ pub fn list_tools() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
-            name: "service.restart".to_string(),
-            description: "Restart a system service and validate that it is active".to_string(),
+            name: "service_restart".to_string(),
+            description: "Restart a system service and automatically validate active state post-condition.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -91,8 +91,8 @@ pub fn list_tools() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
-            name: "package.install".to_string(),
-            description: "Install a software package using the detected environment package manager".to_string(),
+            name: "package_install".to_string(),
+            description: "Install a software package using the detected environment package manager (winget, apt, pkg, choco).".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -102,8 +102,8 @@ pub fn list_tools() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
-            name: "process.list".to_string(),
-            description: "List currently running processes with PID, name, and memory usage".to_string(),
+            name: "process_list".to_string(),
+            description: "List currently running processes with PID, name, memory, and CPU usage via native OS APIs.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -112,8 +112,8 @@ pub fn list_tools() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
-            name: "network.port_check".to_string(),
-            description: "Verify whether a TCP port is open and listening using native socket probe".to_string(),
+            name: "network_port_check".to_string(),
+            description: "Verify whether a TCP port is open and listening using native non-blocking socket probe.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -125,8 +125,8 @@ pub fn list_tools() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
-            name: "filesystem.exists".to_string(),
-            description: "Verify existence and metadata of a file or directory path".to_string(),
+            name: "filesystem_exists".to_string(),
+            description: "Verify existence, type, and size of a file or directory path natively.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -145,20 +145,21 @@ pub async fn call_tool(
 ) -> CallToolResult {
     let start = Instant::now();
     let fp = state.get_fingerprint().await;
+    let normalized = tool_name.replace('.', "_");
 
-    match tool_name {
-        "environment.inspect" => {
+    match normalized.as_str() {
+        "environment_inspect" => {
             let res = CallToolResult::success_json(&fp).unwrap();
             record_call(state, tool_name, arguments, RiskLevel::Low, PolicyAction::Allow, Some(0), &res.content[0].text, "", start.elapsed().as_millis() as u64, ValidationStatus::Success, false, None, None, None).await;
             res
         }
-        "environment.capabilities" => {
+        "environment_capabilities" => {
             let caps = get_capabilities(&fp);
             let res = CallToolResult::success_json(&caps).unwrap();
             record_call(state, tool_name, arguments, RiskLevel::Low, PolicyAction::Allow, Some(0), &res.content[0].text, "", start.elapsed().as_millis() as u64, ValidationStatus::Success, false, None, None, None).await;
             res
         }
-        "command.validate" => {
+        "command_validate" => {
             let cmd = arguments.get("command").and_then(|v| v.as_str()).unwrap_or("");
             let args: Vec<String> = arguments.get("args")
                 .and_then(|v| v.as_array())
@@ -177,7 +178,7 @@ pub async fn call_tool(
             record_call(state, tool_name, arguments, assessment.risk_level, assessment.action, Some(0), &res.content[0].text, "", start.elapsed().as_millis() as u64, ValidationStatus::Success, false, None, None, None).await;
             res
         }
-        "command.execute" => {
+        "command_execute" => {
             let cmd = arguments.get("command").and_then(|v| v.as_str()).unwrap_or("");
             let args: Vec<String> = arguments.get("args")
                 .and_then(|v| v.as_array())
@@ -230,7 +231,7 @@ pub async fn call_tool(
                 }
             }
         }
-        "service.status" => {
+        "service_status" => {
             let svc_name = arguments.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let val = validate_service_status(svc_name, &fp.platform).await;
             let payload = serde_json::json!({
@@ -243,7 +244,7 @@ pub async fn call_tool(
             record_call(state, tool_name, arguments, RiskLevel::Low, PolicyAction::Allow, Some(0), &res.content[0].text, "", start.elapsed().as_millis() as u64, val.status, false, None, None, None).await;
             res
         }
-        "service.restart" => {
+        "service_restart" => {
             let svc_name = arguments.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let (cmd, args) = if fp.platform == "windows" {
                 ("sc.exe", vec!["stop".to_string(), svc_name.to_string()])
@@ -283,7 +284,7 @@ pub async fn call_tool(
             record_call(state, tool_name, arguments, RiskLevel::Medium, PolicyAction::Allow, exit_code, &stdout, &stderr, duration_ms, val.status, is_err, None, None, None).await;
             res
         }
-        "package.install" => {
+        "package_install" => {
             let pkg = arguments.get("package").and_then(|v| v.as_str()).unwrap_or("");
             let (cmd, args) = match fp.package_manager.as_str() {
                 "winget" => ("winget.exe", vec!["install".to_string(), "--id".to_string(), pkg.to_string(), "--silent".to_string(), "--accept-source-agreements".to_string(), "--accept-package-agreements".to_string()]),
@@ -325,7 +326,7 @@ pub async fn call_tool(
                 }
             }
         }
-        "process.list" => {
+        "process_list" => {
             let limit = arguments.get("limit").and_then(|v| v.as_u64()).unwrap_or(30) as usize;
             let mut sys = System::new_all();
             sys.refresh_all();
@@ -352,7 +353,7 @@ pub async fn call_tool(
             record_call(state, tool_name, arguments, RiskLevel::Low, PolicyAction::Allow, Some(0), &res.content[0].text, "", start.elapsed().as_millis() as u64, ValidationStatus::Success, false, None, None, None).await;
             res
         }
-        "network.port_check" => {
+        "network_port_check" => {
             let host = arguments.get("host").and_then(|v| v.as_str()).unwrap_or("127.0.0.1");
             let port = arguments.get("port").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
             let timeout_ms = arguments.get("timeout_ms").and_then(|v| v.as_u64()).unwrap_or(2000);
@@ -370,7 +371,7 @@ pub async fn call_tool(
             record_call(state, tool_name, arguments, RiskLevel::Low, PolicyAction::Allow, Some(0), &res.content[0].text, "", start.elapsed().as_millis() as u64, val.status, is_err, None, None, None).await;
             res
         }
-        "filesystem.exists" => {
+        "filesystem_exists" => {
             let path_str = arguments.get("path").and_then(|v| v.as_str()).unwrap_or("");
             let val = validate_filesystem_path(path_str).await;
             let payload = serde_json::json!({
