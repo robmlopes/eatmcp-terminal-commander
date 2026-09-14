@@ -81,10 +81,9 @@ pub fn resolve_command(raw_program: &str, requested_shell: &str) -> CommandResol
             };
         }
         "powershell" => {
-            let shell_bin = if is_command_in_path("pwsh.exe") { "pwsh.exe" } else { "powershell.exe" };
             return CommandResolution {
                 original_command: raw_program.to_string(),
-                resolved_executable: Some(shell_bin.to_string()),
+                resolved_executable: Some(clean_program.clone()),
                 args_prefix: vec!["-NoProfile".to_string(), "-NonInteractive".to_string(), "-Command".to_string(), clean_program.clone()],
                 resolution_source: "explicit(powershell)".to_string(),
                 recommended_shell: "powershell".to_string(),
@@ -358,10 +357,7 @@ fn is_posix_command(cmd: &str) -> bool {
     )
 }
 
-fn find_windows_bash() -> Option<String> {
-    if is_command_in_path("bash.exe") {
-        return Some("bash.exe".to_string());
-    }
+pub fn find_windows_bash() -> Option<String> {
     let git_bash = Path::new(r"C:\Program Files\Git\bin\bash.exe");
     if git_bash.is_file() {
         return Some(git_bash.to_string_lossy().to_string());
@@ -369,6 +365,19 @@ fn find_windows_bash() -> Option<String> {
     let msys_bash = Path::new(r"C:\msys64\usr\bin\bash.exe");
     if msys_bash.is_file() {
         return Some(msys_bash.to_string_lossy().to_string());
+    }
+    // Check if there is a bash in PATH that is NOT in System32 / Sysnative / SysWOW64
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in path_var.split(';') {
+            let lower = dir.to_lowercase();
+            if lower.contains("system32") || lower.contains("sysnative") || lower.contains("syswow64") {
+                continue;
+            }
+            let candidate = Path::new(dir).join("bash.exe");
+            if candidate.is_file() {
+                return Some(candidate.to_string_lossy().to_string());
+            }
+        }
     }
     None
 }

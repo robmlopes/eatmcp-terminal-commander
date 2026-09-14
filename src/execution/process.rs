@@ -71,7 +71,7 @@ pub async fn run_command(
             };
             let mut c = Command::new(shell_bin);
             let clean_args: Vec<String> = args.iter().map(|a| clean_unquoted_path(a)).collect();
-            let target_prog = resolution.resolved_executable.as_deref().unwrap_or(&clean_prog);
+            let target_prog = &clean_prog;
             let quoted_target = normalize_quoted_command(target_prog);
             let joined_args: String = clean_args
                 .iter()
@@ -92,15 +92,13 @@ pub async fn run_command(
                     format!("{} {}", quoted_target, joined_args)
                 }
             };
-            c.args(&["-NoProfile", "-NonInteractive", "-Command", &full_cmd]);
+            c.args(&["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", &full_cmd]);
             c
         }
         "bash" => {
             let bash_bin = if cfg!(windows) {
-                if crate::environment::detector::is_command_in_path("bash.exe") {
-                    "bash.exe".to_string()
-                } else if std::path::Path::new(r"C:\Program Files\Git\bin\bash.exe").exists() {
-                    r"C:\Program Files\Git\bin\bash.exe".to_string()
+                if let Some(b) = crate::execution::resolver::find_windows_bash() {
+                    b
                 } else {
                     "bash".to_string()
                 }
@@ -109,11 +107,16 @@ pub async fn run_command(
             };
             let mut c = Command::new(&bash_bin);
             let clean_args: Vec<String> = args.iter().map(|a| clean_unquoted_path(a)).collect();
-            let target_prog = resolution.resolved_executable.as_deref().unwrap_or(&clean_prog);
-            let full_cmd = if clean_args.is_empty() {
+            let target_prog = &clean_prog;
+            let joined_args: String = clean_args
+                .iter()
+                .map(|a| if a.contains(' ') { format!("\"{}\"", a) } else { a.clone() })
+                .collect::<Vec<_>>()
+                .join(" ");
+            let full_cmd = if joined_args.is_empty() {
                 target_prog.to_string()
             } else {
-                format!("{} {}", target_prog, clean_args.join(" "))
+                format!("{} {}", target_prog, joined_args)
             };
             c.args(&["-c", &full_cmd]);
             c
@@ -139,6 +142,7 @@ pub async fn run_command(
         cmd.current_dir(clean_wd);
     }
 
+    cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
