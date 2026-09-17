@@ -57,7 +57,18 @@ pub fn show_configs(host: &str, port: u16) {
 }}"#, escape_json_path(&exe_path), args_json);
 
     println!();
-    println!("5. DeepSeek Harness (cordis.yml / agent.cordis.yml):");
+    println!("5. Google Antigravity (~/.gemini/config/mcp_config.json):");
+    println!(r#"{{
+  "mcpServers": {{
+    "eatmcp": {{
+      "command": "{}",
+      "args": {}
+    }}
+  }}
+}}"#, escape_json_path(&exe_path), args_json);
+
+    println!();
+    println!("6. DeepSeek Harness (cordis.yml / agent.cordis.yml):");
     println!(r#"- id: mcp-eatmcp
   name: '@deepseek-ai/dsh-mcp-client'
   config:
@@ -80,15 +91,17 @@ pub fn install_for(target: &str, host: &str, port: u16) -> Result<(), Box<dyn st
         "claude" | "claude-desktop" => install_claude_desktop(&exe_path, &str_args),
         "cursor" => install_cursor(&exe_path, &str_args),
         "windsurf" => install_windsurf(&exe_path, &str_args),
+        "antigravity" | "gemini" => install_antigravity(&exe_path, &str_args),
         "all" => {
             println!("Detecting and installing EATMCP into all available harnesses (host={}, port={})...", host, port);
             let _ = install_claude_desktop(&exe_path, &str_args);
             let _ = install_cursor(&exe_path, &str_args);
             let _ = install_windsurf(&exe_path, &str_args);
+            let _ = install_antigravity(&exe_path, &str_args);
             Ok(())
         }
         _ => {
-            eprintln!("Unknown target '{}'. Available targets: claude-desktop, cursor, windsurf, all", target);
+            eprintln!("Unknown target '{}'. Available targets: claude-desktop, cursor, windsurf, antigravity, all", target);
             Ok(())
         }
     }
@@ -163,6 +176,34 @@ fn install_windsurf(exe_path: &str, args: &[&str]) -> Result<(), Box<dyn std::er
         }
     }
     println!("[-] Windsurf installation directory not found.");
+    Ok(())
+}
+
+fn install_antigravity(exe_path: &str, args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
+    let mut configured = false;
+    if let Ok(home) = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")) {
+        let gemini_global = PathBuf::from(&home).join(".gemini").join("config").join("mcp_config.json");
+        if gemini_global.parent().map(|d| d.exists()).unwrap_or(false) {
+            inject_mcp_config(&gemini_global, "eatmcp", exe_path, args, "Google Antigravity (Global)")?;
+            configured = true;
+        }
+
+        let ide_config = PathBuf::from(&home).join(".gemini").join("antigravity-ide").join("mcp_config.json");
+        if ide_config.parent().map(|d| d.exists()).unwrap_or(false) {
+            inject_mcp_config(&ide_config, "eatmcp", exe_path, args, "Antigravity IDE")?;
+            configured = true;
+        }
+    }
+
+    let local_project = PathBuf::from(".gemini").join("mcp_config.json");
+    if local_project.parent().map(|d| d.exists()).unwrap_or(false) {
+        inject_mcp_config(&local_project, "eatmcp", exe_path, args, "Google Antigravity (Project)")?;
+        configured = true;
+    }
+
+    if !configured {
+        println!("[*] Antigravity configuration: create '~/.gemini/config/mcp_config.json' or '.gemini/mcp_config.json' in your workspace.");
+    }
     Ok(())
 }
 

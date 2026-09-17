@@ -89,7 +89,29 @@ Arquivo de configuração: `~/.codeium/windsurf/mcp_config.json`:
 }
 ```
 
-### 3.5 DeepSeek Harness (DSH Web)
+### 3.5 Google Antigravity / Antigravity IDE
+Arquivo de configuração global do Antigravity:
+- Windows: `%USERPROFILE%\.gemini\config\mcp_config.json` e `%USERPROFILE%\.gemini\antigravity-ide\mcp_config.json`
+- Linux/macOS: `~/.gemini/config/mcp_config.json`
+- Ou no projeto: `.gemini/mcp_config.json`
+
+```json
+{
+  "mcpServers": {
+    "eatmcp": {
+      "command": "D:\\Projetos\\mcp-terminal-commander\\target\\release\\eatmcp.exe",
+      "args": ["--dev-port", "3001"]
+    }
+  }
+}
+```
+
+Também é possível instalar com um comando direto pelo CLI:
+```powershell
+target\release\eatmcp.exe --install antigravity
+```
+
+### 3.6 DeepSeek Harness (DSH Web)
 O plugin já vem pré-configurado no preset do harness em `agent.cordis.yml`:
 ```yaml
 - id: mcp-eatmcp
