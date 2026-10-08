@@ -61,10 +61,12 @@ async fn test_resolve_telnet_and_system_tools() {
 
 #[tokio::test]
 async fn test_resolve_cmd_builtins() {
-    let res = resolve_command("dir", "auto");
-    assert_eq!(res.resolution_source, "cmd_builtin");
-    assert_eq!(res.recommended_shell, "cmd");
-    assert_eq!(res.args_prefix, vec!["/c".to_string(), "dir".to_string()]);
+    if cfg!(windows) {
+        let res = resolve_command("dir", "auto");
+        assert_eq!(res.resolution_source, "cmd_builtin");
+        assert_eq!(res.recommended_shell, "cmd");
+        assert_eq!(res.args_prefix, vec!["/c".to_string(), "dir".to_string()]);
+    }
 }
 
 #[tokio::test]

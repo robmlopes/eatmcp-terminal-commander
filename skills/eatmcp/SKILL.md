@@ -39,3 +39,7 @@ Quando for necessário executar comandos de terminal, inspecionar o sistema ou g
 | Listar processos e uso de memória | `process_list` |
 | Testar se porta TCP está aberta | `network_port_check` |
 | Verificar se arquivo ou pasta existe | `filesystem_exists` |
+| Ler arquivo de texto otimizado (offset, limit, anti-blowup) | `file_read` |
+| Editar arquivo via substituição atômica de texto | `file_edit` |
+| Escrever arquivo diretamente em disco (buffer atômico) | `file_write` |
+| Buscar arquivos e texto ultra-denso (glob + grep com .gitignore) | `file_search` |

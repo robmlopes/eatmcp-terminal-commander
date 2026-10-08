@@ -16,6 +16,10 @@ thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
+libc = "0.2.190"
+ignore = "0.4.33"
+regex = "1.13.1"
+globset = "0.4.20"
 
 [[bin]]
 name = "eatmcp"

@@ -140,6 +140,61 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                 "required": ["path"]
             }),
         },
+        ToolDefinition {
+            name: "file_read".to_string(),
+            description: "OPTIMIZED FILE READER: Read file lines with 1-based offset and line limit. Formatted as dense 'line:content'. Automatically caps large outputs to protect context window.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Path to file" },
+                    "offset": { "type": "number", "description": "1-based line number to start reading from (default: 1)" },
+                    "limit": { "type": "number", "description": "Maximum number of lines to return (default: 2000)" },
+                    "max_bytes": { "type": "number", "description": "Maximum byte length before truncation (default: 131072)" }
+                },
+                "required": ["path"]
+            }),
+        },
+        ToolDefinition {
+            name: "file_edit".to_string(),
+            description: "ATOMIC FILE EDITOR: Exact string replacement in file. Fails safely if match count != 1 (unless replace_all is true). Returns concise status without diff bloat.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Path to file" },
+                    "old_string": { "type": "string", "description": "Exact text to replace" },
+                    "new_string": { "type": "string", "description": "Replacement text" },
+                    "replace_all": { "type": "boolean", "description": "Replace all occurrences instead of requiring exactly 1 match (default: false)" }
+                },
+                "required": ["path", "old_string", "new_string"]
+            }),
+        },
+        ToolDefinition {
+            name: "file_write".to_string(),
+            description: "DIRECT FILE WRITER: Create or overwrite file with buffer directly. Auto-creates parent directories. Atomic disk flush without shell escaping fragility.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Path to file" },
+                    "content": { "type": "string", "description": "Complete text content to write" },
+                    "create_dirs": { "type": "boolean", "description": "Create missing parent directories (default: true)" }
+                },
+                "required": ["path", "content"]
+            }),
+        },
+        ToolDefinition {
+            name: "file_search".to_string(),
+            description: "UNIFIED FILE & CONTENT SEARCH (GLOB + GREP): Search file paths or regex patterns inside files. Respects .gitignore and excludes hidden directories. Output formatted as ultra-dense 'path:line:content'.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Directory to search in (default: '.')" },
+                    "pattern": { "type": "string", "description": "Regex pattern or substring to search inside files (if empty, matches file paths via glob)" },
+                    "glob": { "type": "string", "description": "Optional glob pattern to filter files (e.g. '*.rs', '**/*.ts')" },
+                    "max_results": { "type": "number", "description": "Maximum results to return (default: 250)" },
+                    "case_sensitive": { "type": "boolean", "description": "Case-sensitive regex search (default: true)" }
+                }
+            }),
+        },
     ]
 }
 
@@ -420,6 +475,66 @@ pub async fn call_tool(
             let is_err = val.status == ValidationStatus::Failed;
             let res = CallToolResult::success_json(&payload).unwrap();
             record_call(state, tool_name, arguments, RiskLevel::Low, PolicyAction::Allow, Some(0), &res.content[0].text, "", start.elapsed().as_millis() as u64, val.status, is_err, None, None, None).await;
+            res
+        }
+        "file_read" => {
+            let path_str = arguments.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let offset = arguments.get("offset").and_then(|v| v.as_u64()).map(|v| v as usize);
+            let limit = arguments.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize);
+            let max_bytes = arguments.get("max_bytes").and_then(|v| v.as_u64()).map(|v| v as usize);
+
+            let res = match crate::fs::read_file(path_str, offset, limit, max_bytes) {
+                Ok(content) => CallToolResult::success(content),
+                Err(err) => CallToolResult::error(err),
+            };
+            let is_err = res.is_error;
+            let out_text = res.content.first().map(|c| c.text.as_str()).unwrap_or("");
+            record_call(state, tool_name, arguments, RiskLevel::Low, PolicyAction::Allow, Some(if is_err { 1 } else { 0 }), if is_err { "" } else { out_text }, if is_err { out_text } else { "" }, start.elapsed().as_millis() as u64, if is_err { ValidationStatus::Failed } else { ValidationStatus::Success }, is_err, None, None, None).await;
+            res
+        }
+        "file_edit" => {
+            let path_str = arguments.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let old_str = arguments.get("old_string").and_then(|v| v.as_str()).unwrap_or("");
+            let new_str = arguments.get("new_string").and_then(|v| v.as_str()).unwrap_or("");
+            let replace_all = arguments.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false);
+
+            let res = match crate::fs::edit_file(path_str, old_str, new_str, replace_all) {
+                Ok(msg) => CallToolResult::success(msg),
+                Err(err) => CallToolResult::error(err),
+            };
+            let is_err = res.is_error;
+            let out_text = res.content.first().map(|c| c.text.as_str()).unwrap_or("");
+            record_call(state, tool_name, arguments, RiskLevel::Medium, PolicyAction::Allow, Some(if is_err { 1 } else { 0 }), if is_err { "" } else { out_text }, if is_err { out_text } else { "" }, start.elapsed().as_millis() as u64, if is_err { ValidationStatus::Failed } else { ValidationStatus::Success }, is_err, None, None, None).await;
+            res
+        }
+        "file_write" => {
+            let path_str = arguments.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let content = arguments.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            let create_dirs = arguments.get("create_dirs").and_then(|v| v.as_bool()).unwrap_or(true);
+
+            let res = match crate::fs::write_file(path_str, content, create_dirs) {
+                Ok(msg) => CallToolResult::success(msg),
+                Err(err) => CallToolResult::error(err),
+            };
+            let is_err = res.is_error;
+            let out_text = res.content.first().map(|c| c.text.as_str()).unwrap_or("");
+            record_call(state, tool_name, arguments, RiskLevel::Medium, PolicyAction::Allow, Some(if is_err { 1 } else { 0 }), if is_err { "" } else { out_text }, if is_err { out_text } else { "" }, start.elapsed().as_millis() as u64, if is_err { ValidationStatus::Failed } else { ValidationStatus::Success }, is_err, None, None, None).await;
+            res
+        }
+        "file_search" => {
+            let path_str = arguments.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+            let pattern = arguments.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
+            let glob = arguments.get("glob").and_then(|v| v.as_str());
+            let max_results = arguments.get("max_results").and_then(|v| v.as_u64()).map(|v| v as usize);
+            let case_sensitive = arguments.get("case_sensitive").and_then(|v| v.as_bool());
+
+            let res = match crate::fs::search_files(path_str, pattern, glob, max_results, case_sensitive) {
+                Ok(matches) => CallToolResult::success(matches),
+                Err(err) => CallToolResult::error(err),
+            };
+            let is_err = res.is_error;
+            let out_text = res.content.first().map(|c| c.text.as_str()).unwrap_or("");
+            record_call(state, tool_name, arguments, RiskLevel::Low, PolicyAction::Allow, Some(if is_err { 1 } else { 0 }), if is_err { "" } else { out_text }, if is_err { out_text } else { "" }, start.elapsed().as_millis() as u64, if is_err { ValidationStatus::Failed } else { ValidationStatus::Success }, is_err, None, None, None).await;
             res
         }
         _ => CallToolResult::error(format!("Unknown tool '{}'", tool_name)),
