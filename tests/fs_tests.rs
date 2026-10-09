@@ -54,10 +54,13 @@ fn test_edit_file() {
     let new_content = fs::read_to_string(&test_file).unwrap();
     assert_eq!(new_content, "baz bar baz\nsecond line\n");
 
-    // Single exact match should succeed
+    // Single exact match should succeed with unified diff
     let edit_single = edit_file(&test_file, "bar", "qux", false);
     assert!(edit_single.is_ok());
-    assert!(edit_single.unwrap().contains("1 match replaced"));
+    let res = edit_single.unwrap();
+    assert!(res.message.contains("1 match replaced"));
+    assert!(res.unified_diff.contains("-baz bar baz"));
+    assert!(res.unified_diff.contains("+baz qux baz"));
     let final_content = fs::read_to_string(&test_file).unwrap();
     assert_eq!(final_content, "baz qux baz\nsecond line\n");
 

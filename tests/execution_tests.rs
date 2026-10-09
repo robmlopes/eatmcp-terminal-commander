@@ -125,3 +125,47 @@ async fn test_posix_command_dialect_and_explicit_shell() {
         assert_eq!(cmd_output.exit_code, Some(0));
     }
 }
+
+#[tokio::test]
+async fn test_compound_and_piped_shell_commands() {
+    // Compound command with &&
+    let compound = if cfg!(windows) {
+        run_command("cmd.exe", &["/c".to_string(), "echo first && echo second".to_string()], None, 10000, "auto").await
+    } else {
+        run_command("echo first && echo second", &[], None, 10000, "auto").await
+    };
+    let out = compound.expect("Compound command failed");
+    assert_eq!(out.exit_code, Some(0));
+    assert!(out.stdout.contains("first"));
+    assert!(out.stdout.contains("second"));
+
+    // Piped command with quotes intact
+    let piped = if cfg!(windows) {
+        run_command("cmd.exe", &["/c".to_string(), "echo hello world | findstr world".to_string()], None, 10000, "auto").await
+    } else {
+        run_command("echo 'hello world' | grep 'world'", &[], None, 10000, "auto").await
+    };
+    let out2 = piped.expect("Piped command failed");
+    assert_eq!(out2.exit_code, Some(0));
+    assert!(out2.stdout.contains("world"));
+}
+
+#[test]
+fn test_terminal_output_formatting() {
+    use eatmcp::mcp::tools::format_terminal_output;
+
+    // Normal success
+    let clean = format_terminal_output("hello\n", "", Some(0), false);
+    assert_eq!(clean, "hello\n");
+
+    // Exit code failure with stderr
+    let failed = format_terminal_output("partial output\n", "something failed\n", Some(127), false);
+    assert!(failed.contains("partial output"));
+    assert!(failed.contains("[stderr]\nsomething failed"));
+    assert!(failed.contains("[exit code: 127]"));
+
+    // Timeout
+    let timed_out = format_terminal_output("", "timeout waiting", None, true);
+    assert!(timed_out.contains("[stderr]\ntimeout waiting"));
+    assert!(timed_out.contains("[command timed out]"));
+}

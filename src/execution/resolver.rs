@@ -268,7 +268,7 @@ pub fn resolve_command(raw_program: &str, requested_shell: &str) -> CommandResol
         resolved_executable: None,
         args_prefix: fallback_prefix,
         resolution_source: "unknown".to_string(),
-        recommended_shell: if cfg!(windows) { "cmd".to_string() } else { "sh".to_string() },
+        recommended_shell: if cfg!(windows) { "cmd".to_string() } else { "bash".to_string() },
         dialect,
         shell_compatibility: ShellCompatibility {
             cmd: false,
@@ -282,24 +282,54 @@ pub fn resolve_command(raw_program: &str, requested_shell: &str) -> CommandResol
 pub fn detect_command_dialect(program: &str) -> CommandDialect {
     let clean = clean_unquoted_path(program);
     let lower = clean.to_lowercase();
+    let first_word = lower.split_whitespace().next().unwrap_or(&lower);
 
-    if is_cmd_builtin(&lower) {
+    if is_cmd_builtin(first_word) {
         CommandDialect::CmdBuiltin
-    } else if is_powershell_cmdlet(&lower) {
+    } else if is_powershell_cmdlet(first_word) {
         CommandDialect::PowerShell
-    } else if is_posix_command(&lower) {
+    } else if is_posix_command(first_word) || (!cfg!(windows) && is_shell_command_line(&clean)) {
         CommandDialect::Posix
     } else if lower.ends_with(".cmd") || lower.ends_with(".bat") {
         CommandDialect::WindowsBatch
     } else if lower.ends_with(".ps1") {
         CommandDialect::PowerShell
+    } else if is_shell_command_line(&clean) {
+        if cfg!(windows) {
+            CommandDialect::CmdBuiltin
+        } else {
+            CommandDialect::Posix
+        }
     } else {
         CommandDialect::NativeBinary
     }
 }
 
+pub fn is_shell_command_line(cmd: &str) -> bool {
+    cmd.contains(';')
+        || cmd.contains('|')
+        || cmd.contains('&')
+        || cmd.contains('>')
+        || cmd.contains('<')
+        || cmd.contains('$')
+        || cmd.contains('\n')
+        || cmd.contains('`')
+        || cmd.contains('*')
+}
+
 pub fn clean_unquoted_path(path: &str) -> String {
-    path.trim().replace('"', "")
+    let trimmed = path.trim();
+    if (trimmed.starts_with('"') && trimmed.ends_with('"'))
+        || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+    {
+        if trimmed.len() >= 2 {
+            return trimmed[1..trimmed.len() - 1].to_string();
+        }
+    }
+    if trimmed.contains(r#":\""#) && trimmed.contains('"') {
+        return trimmed.replace('"', "");
+    }
+    trimmed.to_string()
 }
 
 pub fn normalize_quoted_command(path: &str) -> String {

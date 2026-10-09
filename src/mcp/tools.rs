@@ -55,11 +55,11 @@ pub fn list_tools() -> Vec<ToolDefinition> {
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "command": { "type": "string", "description": "Program executable or command name" },
+                    "command": { "type": "string", "description": "Command line to execute, or program executable name" },
                     "args": {
                         "type": "array",
                         "items": { "type": "string" },
-                        "description": "Arguments to pass directly to command"
+                        "description": "Optional arguments to pass to command (if not included in command string)"
                     },
                     "shell": {
                         "type": "string",
@@ -156,7 +156,7 @@ pub fn list_tools() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "file_edit".to_string(),
-            description: "ATOMIC FILE EDITOR: Exact string replacement in file. Fails safely if match count != 1 (unless replace_all is true). Returns concise status without diff bloat.".to_string(),
+            description: "ATOMIC FILE EDITOR: Exact string replacement in file with unified diff generation. Fails safely if match count != 1 (unless replace_all is true). Returns unified diff and structured diff metadata.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -298,11 +298,18 @@ pub async fn call_tool(
                         "likely_cause": cause,
                         "suggested_next_action": next_action,
                     });
-                    let res = if is_err {
-                        CallToolResult::error(serde_json::to_string_pretty(&payload).unwrap())
+                    let terminal_output = format_terminal_output(
+                        &proc_out.stdout,
+                        &proc_out.stderr,
+                        proc_out.exit_code,
+                        proc_out.timed_out,
+                    );
+                    let mut res = if is_err {
+                        CallToolResult::error(terminal_output)
                     } else {
-                        CallToolResult::success(serde_json::to_string_pretty(&payload).unwrap())
+                        CallToolResult::success(terminal_output)
                     };
+                    res.meta = Some(payload);
 
                     record_call(state, tool_name, arguments, assessment.risk_level, assessment.action, proc_out.exit_code, &proc_out.stdout, &proc_out.stderr, proc_out.duration_ms, val_status, is_err, err_class, cause, next_action).await;
                     res
@@ -499,7 +506,20 @@ pub async fn call_tool(
             let replace_all = arguments.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false);
 
             let res = match crate::fs::edit_file(path_str, old_str, new_str, replace_all) {
-                Ok(msg) => CallToolResult::success(msg),
+                Ok(edit_res) => {
+                    let display_text = edit_res.to_string();
+                    let mut tool_res = CallToolResult::success(display_text);
+                    tool_res.meta = Some(serde_json::json!({
+                        "diffs": [
+                            {
+                                "path": edit_res.path,
+                                "oldText": edit_res.old_text,
+                                "newText": edit_res.new_text,
+                            }
+                        ]
+                    }));
+                    tool_res
+                }
                 Err(err) => CallToolResult::error(err),
             };
             let is_err = res.is_error;
@@ -512,8 +532,36 @@ pub async fn call_tool(
             let content = arguments.get("content").and_then(|v| v.as_str()).unwrap_or("");
             let create_dirs = arguments.get("create_dirs").and_then(|v| v.as_bool()).unwrap_or(true);
 
+            let old_content_opt = std::fs::read_to_string(path_str).ok();
+
             let res = match crate::fs::write_file(path_str, content, create_dirs) {
-                Ok(msg) => CallToolResult::success(msg),
+                Ok(msg) => {
+                    if let Some(old_content) = old_content_opt {
+                        if old_content != content {
+                            let diff = crate::fs::generate_unified_diff(path_str, &old_content, content);
+                            let text = if !diff.is_empty() {
+                                format!("{}\n\n{}", msg, diff)
+                            } else {
+                                msg
+                            };
+                            let mut tool_res = CallToolResult::success(text);
+                            tool_res.meta = Some(serde_json::json!({
+                                "diffs": [
+                                    {
+                                        "path": path_str,
+                                        "oldText": old_content,
+                                        "newText": content,
+                                    }
+                                ]
+                            }));
+                            tool_res
+                        } else {
+                            CallToolResult::success(msg)
+                        }
+                    } else {
+                        CallToolResult::success(msg)
+                    }
+                }
                 Err(err) => CallToolResult::error(err),
             };
             let is_err = res.is_error;
@@ -587,4 +635,41 @@ async fn record_call(
         suggested_next_action,
     };
     state.record(rec).await;
+}
+
+pub fn format_terminal_output(
+    stdout: &str,
+    stderr: &str,
+    exit_code: Option<i32>,
+    timed_out: bool,
+) -> String {
+    let mut out = String::new();
+    if !stdout.is_empty() {
+        out.push_str(stdout);
+    }
+    if !stderr.is_empty() {
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str("[stderr]\n");
+        out.push_str(stderr);
+    }
+    if timed_out {
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str("[command timed out]");
+    } else if let Some(code) = exit_code {
+        if code != 0 {
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(&format!("[exit code: {}]", code));
+        }
+    }
+    if out.is_empty() {
+        "[no output]".to_string()
+    } else {
+        out
+    }
 }

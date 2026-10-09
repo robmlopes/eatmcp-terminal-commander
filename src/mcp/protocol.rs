@@ -97,6 +97,8 @@ pub struct CallToolResult {
     pub content: Vec<ToolContent>,
     #[serde(rename = "isError", skip_serializing_if = "std::ops::Not::not", default)]
     pub is_error: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Value>,
 }
 
 impl CallToolResult {
@@ -104,6 +106,15 @@ impl CallToolResult {
         Self {
             content: vec![ToolContent::text(text)],
             is_error: false,
+            meta: None,
+        }
+    }
+
+    pub fn success_with_meta(text: impl Into<String>, meta: Value) -> Self {
+        Self {
+            content: vec![ToolContent::text(text)],
+            is_error: false,
+            meta: Some(meta),
         }
     }
 
@@ -116,6 +127,15 @@ impl CallToolResult {
         Self {
             content: vec![ToolContent::text(text)],
             is_error: true,
+            meta: None,
+        }
+    }
+
+    pub fn error_with_meta(text: impl Into<String>, meta: Value) -> Self {
+        Self {
+            content: vec![ToolContent::text(text)],
+            is_error: true,
+            meta: Some(meta),
         }
     }
 }

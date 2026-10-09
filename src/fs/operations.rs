@@ -3,6 +3,37 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use globset::GlobBuilder;
 use regex::RegexBuilder;
+use serde::{Deserialize, Serialize};
+use similar::TextDiff;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditResult {
+    pub message: String,
+    pub path: String,
+    pub old_text: String,
+    pub new_text: String,
+    pub replacements_count: usize,
+    pub unified_diff: String,
+}
+
+impl std::fmt::Display for EditResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.unified_diff.is_empty() {
+            write!(f, "{}", self.message)
+        } else {
+            write!(f, "{}\n\n{}", self.message, self.unified_diff)
+        }
+    }
+}
+
+/// Generates a standard unified diff between two text contents.
+pub fn generate_unified_diff(path: &str, old_content: &str, new_content: &str) -> String {
+    let diff = TextDiff::from_lines(old_content, new_content);
+    diff.unified_diff()
+        .context_radius(3)
+        .header(&format!("a/{}", path), &format!("b/{}", path))
+        .to_string()
+}
 
 /// Read a text file with line numbers, offset, and limit.
 pub fn read_file(
@@ -67,13 +98,13 @@ pub fn read_file(
     Ok(out)
 }
 
-/// Exact substring replacement with atomic write.
+/// Exact substring replacement with atomic write and unified diff generation.
 pub fn edit_file(
     path_str: &str,
     old_string: &str,
     new_string: &str,
     replace_all: bool,
-) -> Result<String, String> {
+) -> Result<EditResult, String> {
     let path = Path::new(path_str);
     if !path.exists() {
         return Err(format!("File '{}' not found", path_str));
@@ -104,8 +135,18 @@ pub fn edit_file(
 
     atomic_write(path, new_content.as_bytes())?;
 
+    let unified_diff = generate_unified_diff(path_str, &content, &new_content);
     let s = if count > 1 { "es" } else { "" };
-    Ok(format!("OK: {} match{} replaced in {}", count, s, path_str))
+    let message = format!("The file '{}' has been updated successfully ({} match{} replaced).", path_str, count, s);
+
+    Ok(EditResult {
+        message,
+        path: path_str.to_string(),
+        old_text: old_string.to_string(),
+        new_text: new_string.to_string(),
+        replacements_count: count,
+        unified_diff,
+    })
 }
 
 /// Direct file write with atomic safety and directory auto-creation.

@@ -57,10 +57,14 @@ pub async fn run_command(
     let mut cmd = match resolution.recommended_shell.as_str() {
         "cmd" => {
             let mut c = Command::new("cmd.exe");
-            let mut combined_args = resolution.args_prefix;
-            let clean_args: Vec<String> = args.iter().map(|a| clean_unquoted_path(a)).collect();
-            combined_args.extend(clean_args);
-            c.args(&combined_args);
+            if args.is_empty() {
+                c.args(&["/s", "/c", program]);
+            } else {
+                let mut combined_args = resolution.args_prefix;
+                let clean_args: Vec<String> = args.iter().map(|a| clean_unquoted_path(a)).collect();
+                combined_args.extend(clean_args);
+                c.args(&combined_args);
+            }
             c
         }
         "powershell" => {
@@ -95,34 +99,41 @@ pub async fn run_command(
             c.args(&["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", &full_cmd]);
             c
         }
-        "bash" => {
+        "bash" | "sh" => {
             let bash_bin = if cfg!(windows) {
                 if let Some(b) = crate::execution::resolver::find_windows_bash() {
                     b
                 } else {
                     "bash".to_string()
                 }
-            } else {
+            } else if crate::environment::detector::is_command_in_path("bash") {
                 "bash".to_string()
+            } else {
+                "sh".to_string()
             };
             let mut c = Command::new(&bash_bin);
-            let clean_args: Vec<String> = args.iter().map(|a| clean_unquoted_path(a)).collect();
-            let target_prog = &clean_prog;
-            let joined_args: String = clean_args
-                .iter()
-                .map(|a| if a.contains(' ') { format!("\"{}\"", a) } else { a.clone() })
-                .collect::<Vec<_>>()
-                .join(" ");
-            let full_cmd = if joined_args.is_empty() {
-                target_prog.to_string()
+            let full_cmd = if args.is_empty() {
+                program.to_string()
             } else {
-                format!("{} {}", target_prog, joined_args)
+                let clean_args: Vec<String> = args.iter().map(|a| clean_unquoted_path(a)).collect();
+                let joined_args: String = clean_args
+                    .iter()
+                    .map(|a| if a.contains(' ') && !(a.starts_with('"') && a.ends_with('"')) { format!("\"{}\"", a) } else { a.clone() })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("{} {}", clean_prog, joined_args)
             };
             c.args(&["-c", &full_cmd]);
             c
         }
         _ => {
-            if let Some(ref exec) = resolution.resolved_executable {
+            if args.is_empty() && (program.contains(' ') || program.contains(';') || program.contains('|') || program.contains('&')) {
+                let shell_bin = if cfg!(windows) { "cmd.exe" } else { "bash" };
+                let flag = if cfg!(windows) { "/c" } else { "-c" };
+                let mut c = Command::new(shell_bin);
+                c.args(&[flag, program]);
+                c
+            } else if let Some(ref exec) = resolution.resolved_executable {
                 let clean_exec = clean_unquoted_path(exec);
                 let mut c = Command::new(&clean_exec);
                 let clean_args: Vec<String> = args.iter().map(|a| clean_unquoted_path(a)).collect();
@@ -142,6 +153,28 @@ pub async fn run_command(
         cmd.current_dir(clean_wd);
     }
 
+    // Enhance PATH with Windows directories on WSL/Linux if available
+    if !cfg!(windows) {
+        if let Ok(current_path) = std::env::var("PATH") {
+            let win_dirs = [
+                "/mnt/c/Windows/System32",
+                "/mnt/c/Windows",
+                "/mnt/c/Windows/System32/Wbem",
+                "/mnt/c/Windows/System32/WindowsPowerShell/v1.0",
+            ];
+            let mut to_add = Vec::new();
+            for dir in &win_dirs {
+                if std::path::Path::new(dir).is_dir() && !current_path.split(':').any(|p| p == *dir) {
+                    to_add.push(*dir);
+                }
+            }
+            if !to_add.is_empty() {
+                let enriched_path = format!("{}:{}", current_path, to_add.join(":"));
+                cmd.env("PATH", enriched_path);
+            }
+        }
+    }
+
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
@@ -150,15 +183,44 @@ pub async fn run_command(
     let child_res = cmd.spawn();
     let mut child = match child_res {
         Ok(c) => c,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound && cfg!(windows) => {
-            // Automatic fallback through cmd.exe /c
-            let mut fallback_cmd = Command::new("cmd.exe");
-            let mut fallback_args = vec!["/s".to_string(), "/c".to_string(), normalize_quoted_command(&clean_prog)];
-            fallback_args.extend(args.iter().map(|a| clean_unquoted_path(a)));
-            fallback_cmd.args(&fallback_args);
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            // Automatic fallback through shell
+            let (fallback_shell, flag) = if cfg!(windows) { ("cmd.exe", "/c") } else { ("bash", "-c") };
+            let full_line = if args.is_empty() {
+                program.to_string()
+            } else {
+                let clean_args: Vec<String> = args.iter().map(|a| clean_unquoted_path(a)).collect();
+                let joined_args: String = clean_args
+                    .iter()
+                    .map(|a| if a.contains(' ') && !(a.starts_with('"') && a.ends_with('"')) { format!("\"{}\"", a) } else { a.clone() })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("{} {}", program, joined_args)
+            };
+            let mut fallback_cmd = Command::new(fallback_shell);
+            fallback_cmd.args(&[flag, &full_line]);
             if let Some(wd) = working_dir {
                 fallback_cmd.current_dir(clean_unquoted_path(wd));
             }
+            if !cfg!(windows) {
+                if let Ok(current_path) = std::env::var("PATH") {
+                    let win_dirs = [
+                        "/mnt/c/Windows/System32",
+                        "/mnt/c/Windows",
+                        "/mnt/c/Windows/System32/Wbem",
+                    ];
+                    let mut to_add = Vec::new();
+                    for dir in &win_dirs {
+                        if std::path::Path::new(dir).is_dir() && !current_path.split(':').any(|p| p == *dir) {
+                            to_add.push(*dir);
+                        }
+                    }
+                    if !to_add.is_empty() {
+                        fallback_cmd.env("PATH", format!("{}:{}", current_path, to_add.join(":")));
+                    }
+                }
+            }
+            fallback_cmd.stdin(Stdio::null());
             fallback_cmd.stdout(Stdio::piped());
             fallback_cmd.stderr(Stdio::piped());
             fallback_cmd.spawn().map_err(|_| err)?
