@@ -21,6 +21,7 @@ ignore = "0.4.33"
 regex = "1.13.1"
 globset = "0.4.20"
 similar = "3.2.0"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
 [[bin]]
 name = "eatmcp"

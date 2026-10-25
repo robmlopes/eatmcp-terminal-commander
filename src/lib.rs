@@ -9,3 +9,4 @@ pub mod recovery;
 pub mod safety;
 pub mod state;
 pub mod validation;
+pub mod web;

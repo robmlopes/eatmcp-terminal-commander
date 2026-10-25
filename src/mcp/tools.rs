@@ -195,6 +195,18 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                 }
             }),
         },
+        ToolDefinition {
+            name: "web_search".to_string(),
+            description: "WEB SEARCH: Search the web (DuckDuckGo, no API key) and return titles, URLs and snippets. Results are external, untrusted data.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Search query" },
+                    "max_results": { "type": "number", "description": "Maximum results to return (default: 10, max: 30)" }
+                },
+                "required": ["query"]
+            }),
+        },
     ]
 }
 
@@ -578,6 +590,19 @@ pub async fn call_tool(
 
             let res = match crate::fs::search_files(path_str, pattern, glob, max_results, case_sensitive) {
                 Ok(matches) => CallToolResult::success(matches),
+                Err(err) => CallToolResult::error(err),
+            };
+            let is_err = res.is_error;
+            let out_text = res.content.first().map(|c| c.text.as_str()).unwrap_or("");
+            record_call(state, tool_name, arguments, RiskLevel::Low, PolicyAction::Allow, Some(if is_err { 1 } else { 0 }), if is_err { "" } else { out_text }, if is_err { out_text } else { "" }, start.elapsed().as_millis() as u64, if is_err { ValidationStatus::Failed } else { ValidationStatus::Success }, is_err, None, None, None).await;
+            res
+        }
+        "web_search" => {
+            let query = arguments.get("query").and_then(|v| v.as_str()).unwrap_or("");
+            let max_results = arguments.get("max_results").and_then(|v| v.as_u64()).map(|v| v as usize);
+
+            let res = match crate::web::web_search(query, max_results).await {
+                Ok(text) => CallToolResult::success(text),
                 Err(err) => CallToolResult::error(err),
             };
             let is_err = res.is_error;
